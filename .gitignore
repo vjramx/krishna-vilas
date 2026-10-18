@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.production
+*.local
+.DS_Store
+
+# Firebase service-account keys (empower the admin SDK — never commit)
+serviceAccountKey.json
+*-service-account*.json
+firebase-adminsdk-*.json
+
+# local scratch (uuid screenshots, probes)
+.tmp/
+openapi-tmp.json

@@ -1,0 +1,277 @@
+/* Resolve the app theme relative to this stylesheet, not the server's cwd. */
+@config "../tailwind.config.js";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  /* Measured at runtime by CustomerHeader; keeps sticky sub-bars glued below it. */
+  --app-header: calc(56px + var(--safe-top));
+  --header-h: 56px;
+  --tabbar-h: 58px;
+  --ripple: rgba(64, 39, 31, 0.12);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  height: 100%;
+  /* Kill the browser's own pull-to-refresh / rubber banding: the app owns the gesture. */
+  overscroll-behavior: none;
+}
+
+body {
+  @apply bg-brand-bg text-brand-text antialiased;
+  font-family: Roboto, 'Noto Sans Kannada', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+  /* App chrome, not a web page: no long-press menus, no blue tap flash, no text selection. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+#root {
+  min-height: 100dvh;
+  isolation: isolate;
+}
+
+/* Allow selection where reading/copying matters. */
+input,
+textarea,
+select,
+.selectable,
+.selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* `clip`, not `hidden`: overflow-x:hidden turns the root into a scroll
+   container and silently breaks every position:sticky app bar. */
+html,
+body {
+  max-width: 100dvw;
+  overflow-x: clip;
+}
+
+/* App scroll surfaces never show desktop scrollbars. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Visible focus for keyboards, invisible for touch. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid #c83e24;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+button,
+a[role='button'],
+[role='tab'],
+[role='switch'] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+
+/* Touch feedback: Material ripple stand-in that works in every Android WebView. */
+.tap {
+  transition: transform 110ms cubic-bezier(0.2, 0, 0, 1), background-color 110ms ease;
+}
+.tap:active {
+  transform: scale(0.975);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-brand-card border border-brand-border rounded-xl2 shadow-soft;
+  }
+  .card-flat {
+    @apply bg-brand-card border border-brand-border rounded-xl2;
+  }
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 font-semibold
+      transition-colors min-h-[48px] min-w-0 tap;
+    letter-spacing: 0.01em;
+  }
+  .btn-primary {
+    @apply btn bg-brand-primary text-white active:bg-brand-primaryDark disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-brand-text border border-brand-border active:bg-brand-bg
+      disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-brand-primary active:bg-brand-bg;
+  }
+  .input {
+    @apply w-full min-w-0 rounded-xl border border-brand-border bg-white px-3 py-3 text-base
+      text-brand-text placeholder:text-brand-subtle/70;
+    font-size: 16px; /* Android keyboard + no zoom jump */
+  }
+  .label {
+    @apply block text-sm font-medium text-brand-text mb-1;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap max-w-full;
+  }
+  /* Phone-width app column used by every screen (keeps clear of notches in landscape). */
+  .app-col {
+    @apply mx-auto w-full;
+    max-width: 480px;
+    padding-inline: calc(1rem + var(--safe-left)) calc(1rem + var(--safe-right));
+  }
+  .app-scroll {
+    @apply overflow-y-auto overscroll-contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .pt-safe {
+    padding-top: var(--safe-top);
+  }
+  .pb-safe {
+    padding-bottom: var(--safe-bottom);
+  }
+  .pb-nav {
+    padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 1rem);
+  }
+  .pb-cta {
+    padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 5.5rem);
+  }
+  .h-tabbar {
+    height: calc(var(--tabbar-h) + var(--safe-bottom));
+  }
+  .wrap-break-word {
+    overflow-wrap: anywhere;
+  }
+  .tap-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
+
+/* ---------------------------------------------------------- app motion */
+/* Material "fade through". Opacity only on purpose: any transform on this
+   wrapper would become the containing block for the fixed bottom tab bar and
+   sticky action bars, and they would visibly jump on every navigation. */
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.page-enter {
+  animation: page-in 180ms ease-out both;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    transform: none;
+  }
+}
+.sheet-up {
+  animation: sheet-up 260ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 180ms ease-out both;
+}
+
+@keyframes snackbar-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.snackbar-in {
+  animation: snackbar-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes kv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.skeleton {
+  @apply rounded-lg bg-brand-border/60;
+  animation: kv-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pull-to-refresh spinner rotation */
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ptr-spinning {
+  animation: ptr-spin 700ms linear infinite;
+}

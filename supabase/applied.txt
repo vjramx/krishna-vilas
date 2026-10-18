@@ -1,0 +1,20 @@
+OK   0: create table if not exists public.user_activity ( user_id te
+OK   1: create index if not exists user_activity_last_seen_idx on pu
+OK   2: create index if not exists user_activity_first_seen_idx on p
+OK   3: create index if not exists orders_customer_created_idx on pu
+OK   4: create index if not exists orders_created_at_idx on public.o
+OK   5: create index if not exists orders_delivered_at_idx on public
+OK   6: create index if not exists orders_cash_unverified_idx on pub
+OK   7: alter table public.user_activity enable row level security;
+OK   8: drop policy if exists user_activity_admin_read on public.use
+OK   9: create policy user_activity_admin_read on public.user_activi
+OK   10: create or replace function public.kv_record_user_activity() 
+OK   11: revoke execute on function public.kv_record_user_activity() 
+OK   12: grant execute on function public.kv_record_user_activity() t
+OK   13: create or replace function public.admin_dashboard_summary() 
+OK   14: revoke execute on function public.admin_dashboard_summary() 
+OK   15: grant execute on function public.admin_dashboard_summary() t
+OK   16: create or replace function public.admin_user_directory( p_se
+OK   17: revoke execute on function public.admin_user_directory(text,
+OK   18: grant execute on function public.admin_user_directory(text, 
+OK   19: notify pgrst, 'reload schema';
