@@ -6,7 +6,7 @@ import { parseKvError } from '@/lib/errors';
 import type { Category, MenuItem } from '@/types/db';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
 import { menuDiscountPercent, menuPriceNumber, validateMenuPrice } from '@/lib/menuItemForm';
-import { BadgeCheck, ImagePlus, Leaf, Pencil, Plus, Save, Star, Upload, Utensils } from 'lucide-react';
+import { BadgeCheck, Eye, EyeOff, ImagePlus, Leaf, Pencil, Plus, Save, Star, Upload, Utensils } from 'lucide-react';
 
 interface Draft {
   id?: string;
@@ -52,6 +52,7 @@ export default function AdminMenu() {
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [visibilityBusyId, setVisibilityBusyId] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -119,6 +120,25 @@ export default function AdminMenu() {
       setErr(t(parseKvError(error).key));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleCustomerVisibility(item: MenuItem) {
+    if (visibilityBusyId) return;
+    const isActive = !item.is_active;
+    setVisibilityBusyId(item.id);
+    setErr(null);
+    try {
+      const { data, error } = await supabase.from('menu_items')
+        .update({ is_active: isActive }).eq('id', item.id).select('id, is_active');
+      if (error) throw error;
+      if (!data?.length) throw new Error('MENU_ITEM_NOT_UPDATED');
+      setItems((prev) => prev.map((menuItem) => menuItem.id === item.id ? { ...menuItem, is_active: isActive } : menuItem));
+      setNotice(t(isActive ? 'admin.itemShown' : 'admin.itemHidden'));
+    } catch (error: unknown) {
+      setErr(t(parseKvError(error).key));
+    } finally {
+      setVisibilityBusyId(null);
     }
   }
 
@@ -250,7 +270,7 @@ export default function AdminMenu() {
       {items.length === 0 && <p className="card p-4 text-sm text-brand-subtle">{t('menu.emptyCategory')}</p>}
       <ul className="grid gap-2">
         {items.map((item) => (
-          <li key={item.id} className="card flex items-center gap-3 p-3 min-w-0">
+          <li key={item.id} className="card flex min-w-0 flex-wrap items-center gap-3 p-3">
             <button type="button" className="btn-secondary h-11 w-11 shrink-0 p-0" onClick={() => openEdit(item)} aria-label={`${t('admin.editItem')}: ${item.name_en}`}>
               <Pencil size={16} aria-hidden="true" />
             </button>
@@ -262,18 +282,31 @@ export default function AdminMenu() {
                 {item.is_vegetarian ? '🟢' : '🔴'} {t(item.is_vegetarian ? 'admin.vegetarian' : 'admin.nonVegetarian')}
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={item.is_available}
-              aria-label={`${item.name_en}: ${t('admin.available')}`}
-              className={`badge px-3 ${item.is_available ? 'bg-brand-successBg text-brand-success' : 'bg-brand-errorBg text-brand-error'}`}
-              disabled={busy}
-              onClick={() => void toggleAvailability(item)}
-            >
-              {item.is_available ? '✓ ' + t('admin.available') : '✕ ' + t('admin.unavailable')}
-            </button>
-            {!item.is_active && <span className="badge bg-brand-warnBg text-brand-warn">{t('cart.title')}</span>}
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={item.is_available}
+                aria-label={`${item.name_en}: ${t('admin.available')}`}
+                className={`badge px-3 ${item.is_available ? 'bg-brand-successBg text-brand-success' : 'bg-brand-errorBg text-brand-error'}`}
+                disabled={busy}
+                onClick={() => void toggleAvailability(item)}
+              >
+                {item.is_available ? '✓ ' + t('admin.available') : '✕ ' + t('admin.unavailable')}
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={item.is_active}
+                title={t(item.is_active ? 'admin.hideFromMenu' : 'admin.showInMenu')}
+                className={`grid h-11 w-11 place-items-center rounded-xl border ${item.is_active ? 'border-brand-success/30 bg-brand-successBg text-brand-success' : 'border-brand-border bg-white text-brand-subtle'}`}
+                disabled={visibilityBusyId !== null}
+                onClick={() => void toggleCustomerVisibility(item)}
+                aria-label={`${item.name_en}: ${t(item.is_active ? 'admin.hideFromMenu' : 'admin.showInMenu')}`}
+              >
+                {item.is_active ? <Eye size={18} aria-hidden="true" /> : <EyeOff size={18} aria-hidden="true" />}
+              </button>
+            </div>
           </li>
         ))}
       </ul>

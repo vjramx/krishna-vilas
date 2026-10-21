@@ -186,8 +186,7 @@ export default function AccountPage() {
               </p>
             )}
             {/* Friendly access state when the backend refused/failed to verify
-                the session — visible to everyone; raw text is dev-only. */}
-            {roleError && (
+                the session — visible to everyone; internals are never shown. */}            {roleError && (
               <div
                 className="mt-3 rounded-xl border border-brand-error/25 bg-brand-errorBg p-3"
                 role="alert"
@@ -202,20 +201,6 @@ export default function AccountPage() {
                   {t('login.retryRoleCheck')}
                 </button>
               </div>
-            )}
-            {/* Dev-only diagnostic: the backend-resolved role for this sign-in.
-                Makes a wrong-email or rejected-token login visible right here. */}
-            {import.meta.env.DEV && (
-              <p
-                data-testid="account-role-diagnostic"
-                className={`mt-2 text-[11px] leading-relaxed ${
-                  roleError ? 'font-semibold text-brand-error opacity-100' : 'opacity-70'
-                }`}
-              >
-                {roleError
-                  ? `[dbg] role error: ${roleError}`
-                  : `[dbg] ${email ?? 'no email'} → role=${role}`}
-              </p>
             )}
           </div>
           <div className="grid divide-y divide-brand-border px-3 py-1">

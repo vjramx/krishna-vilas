@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Order } from '@/types/db';
+import type { Order, OrderItemWithSnapshot } from '@/types/db';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 
@@ -235,14 +235,14 @@ export function useMyOrders(): {
  * disconnect fallbacks as the history list. */
 export function useOrder(orderId: string | undefined): {
   order: Order | null;
-  items: { id: string; name_en: string; name_kn: string; unit_price: string; quantity: number; item_total: string; discount_amount: string }[];
+  items: OrderItemWithSnapshot[];
   loading: boolean;
   error: string | null;
   live: boolean;
   retry: () => void;
 } {
   const [order, setOrder] = useState<Order | null>(null);
-  const [items, setItems] = useState<{ id: string; name_en: string; name_kn: string; unit_price: string; quantity: number; item_total: string; discount_amount: string }[]>([]);
+  const [items, setItems] = useState<OrderItemWithSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(true);
@@ -263,9 +263,23 @@ export function useOrder(orderId: string | undefined): {
         setError(oe?.message ?? ie?.message ?? 'not found');
       } else {
         setOrder(o as Order);
-        setItems(oi ?? []);
+        const rows = ((oi ?? []) as OrderItemWithSnapshot[]);
+        // Item images/descriptions live on menu_items (no FK embed is defined,
+        // so hydrate by the stored menu_item_id; catalog reads are public).
+        const menuIds = [...new Set(rows.map((r) => r.menu_item_id).filter((v): v is string => !!v))];
+        if (menuIds.length === 0) {
+          setItems(rows.map((r) => ({ ...r, menu_items: null })));
+        } else {
+          const { data: mi } = await supabase
+            .from('menu_items')
+            .select('id, image_path, description_en, description_kn, is_vegetarian')
+            .in('id', menuIds);
+          if (!active) return;
+          const byId = new Map(((mi ?? []) as NonNullable<OrderItemWithSnapshot['menu_items']>[]).map((m) => [m.id, m]));
+          setItems(rows.map((r) => ({ ...r, menu_items: (r.menu_item_id && byId.get(r.menu_item_id)) || null })));
+        }
       }
-      setLoading(false);
+      if (active) setLoading(false);
     })();
 
     const refetch = async () => {

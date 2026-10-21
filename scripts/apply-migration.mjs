@@ -103,7 +103,7 @@ if (!sqlFile) {
   const applied = [];
   for (const [idx, stmt] of statements.entries()) {
     const { ok, status, body } = await runQuery(stmt);
-    const head = stmt.replace(/\s+/g, ' ').slice(0, 60);
+    const head = stmt.replace(/\s+/g, ' ').slice(0, 60).trimEnd();
     if (!ok) {
       if (/already exists|duplicate/i.test(body) && !/syntax error/i.test(body)) {
         applied.push(`SKIP ${idx}: ${head}`);

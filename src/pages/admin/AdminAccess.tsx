@@ -28,6 +28,8 @@ const STATUS_ACTIONS: Record<string, string> = {
   FIELD_ROLE: 'admin.access.errRole',
   CANNOT_INVITE_SELF: 'admin.access.errSelf',
   ALREADY_ADMIN: 'admin.access.errAlready',
+  ADMIN_INVITATION_CONFLICT: 'admin.access.errConflict',
+  AUTH_REQUIRED: 'admin.access.noManagementAccess',
   CANNOT_REMOVE_SELF: 'admin.access.errRemoveSelf',
   CANNOT_REMOVE_SUPER_ADMIN: 'admin.access.errRemoveSuper',
 };
@@ -41,6 +43,7 @@ export default function AdminAccess() {
   const [state, setState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSuper, setIsSuper] = useState(false);
+  const [accessData, setAccessData] = useState({ admins: false, invitations: false });
   const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [invites, setInvites] = useState<Invitation[]>([]);
   const [email, setEmail] = useState('');
@@ -50,33 +53,50 @@ export default function AdminAccess() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [superRes, adminsRes, invitesRes] = await Promise.all([
-      supabase.rpc('is_current_super_admin'),
-      supabase.from('admin_users').select('id, email, role, created_at').order('created_at'),
-      supabase.from('admin_invitations').select('*').order('created_at', { ascending: false }),
-    ]);
-    const err = superRes.error ?? adminsRes.error ?? invitesRes.error;
-    if (err) {
-      setErrorMsg(err.message);
+    try {
+      const [superRes, adminsRes, invitesRes] = await Promise.all([
+        supabase.rpc('is_current_super_admin'),
+        supabase.from('admin_users').select('id, email, role, created_at').order('created_at'),
+        supabase.from('admin_invitations').select('*').order('created_at', { ascending: false }),
+      ]);
+      if (superRes.error) {
+        setErrorMsg(superRes.error.message);
+        setState('error');
+        return;
+      }
+      const isSuperAdmin = superRes.data === true;
+      setIsSuper(isSuperAdmin);
+      setAccessData({ admins: !adminsRes.error, invitations: !invitesRes.error });
+      if (adminsRes.error && isSuperAdmin) throw adminsRes.error;
+      if (invitesRes.error && isSuperAdmin) throw invitesRes.error;
+      setAdmins(adminsRes.data ?? []);
+      setInvites(invitesRes.data ?? []);
+      setState('ready');
+    } catch (error: unknown) {
+      setErrorMsg(error instanceof Error ? error.message : t('common.somethingWrong'));
       setState('error');
-      return;
     }
-    setIsSuper(superRes.data === true);
-    setAdmins(adminsRes.data ?? []);
-    setInvites(invitesRes.data ?? []);
-    setState('ready');
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     setState('loading');
     void load();
   }, [load]);
 
-  function rpcErrorKey(e: { message?: string } | null): string | null {
-    if (!e) return null;
+  function rpcErrorKey(error: unknown): string {
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null
+        ? [
+            'message' in error ? String(error.message) : '',
+            'code' in error ? String(error.code) : '',
+            'status' in error ? String(error.status) : '',
+          ].join(' ')
+        : String(error ?? '');
     for (const [code, key] of Object.entries(STATUS_ACTIONS)) {
-      if (e.message?.includes(code)) return key;
+      if (message.includes(code)) return key;
     }
+    if (/401|403|42501|permission denied/i.test(message)) return 'admin.access.noManagementAccess';
     return 'common.somethingWrong';
   }
 
@@ -85,40 +105,50 @@ export default function AdminAccess() {
     setBusy(true);
     setNotice(null);
     setFormError(null);
-    const { error } = await supabase.rpc('staff_invite_admin', { p_email: email.trim(), p_role: roleSel });
-    setBusy(false);
-    if (error) {
+    try {
+      const { error } = await supabase.rpc('staff_invite_admin', { p_email: email.trim(), p_role: roleSel });
+      if (error) throw error;
+      setEmail('');
+      setRoleSel('admin');
+      setNotice(t('admin.access.invited'));
+      void load();
+    } catch (error: unknown) {
       setFormError(rpcErrorKey(error));
-      return;
+    } finally {
+      setBusy(false);
     }
-    setEmail('');
-    setNotice(t('admin.access.invited'));
-    void load();
   }
 
   async function revoke(id: string) {
     if (busy) return;
     setBusy(true);
-    const { error } = await supabase.rpc('staff_revoke_invitation', { p_id: id });
-    setBusy(false);
-    if (error) {
+    setFormError(null);
+    try {
+      const { error } = await supabase.rpc('staff_revoke_invitation', { p_id: id });
+      if (error) throw error;
+      void load();
+    } catch (error: unknown) {
       setFormError(rpcErrorKey(error));
-      return;
+    } finally {
+      setBusy(false);
     }
-    void load();
   }
 
   async function removeAccess(emailTarget: string) {
     if (busy) return;
     setBusy(true);
-    const { error } = await supabase.rpc('staff_remove_admin', { p_email: emailTarget });
-    setBusy(false);
-    if (error) {
+    setNotice(null);
+    setFormError(null);
+    try {
+      const { error } = await supabase.rpc('staff_remove_admin', { p_email: emailTarget });
+      if (error) throw error;
+      setNotice(t('admin.access.removed'));
+      void load();
+    } catch (error: unknown) {
       setFormError(rpcErrorKey(error));
-      return;
+    } finally {
+      setBusy(false);
     }
-    setNotice(t('admin.access.removed'));
-    void load();
   }
 
   if (state === 'loading') return <Spinner />;
@@ -207,6 +237,12 @@ export default function AdminAccess() {
       )}
 
       {/* Pending invitations */}
+      {!isSuper && (!accessData.admins || !accessData.invitations) && (
+        <p className="card p-3 text-sm text-brand-warn" role="status">
+          {t('admin.access.noManagementAccess')}
+        </p>
+      )}
+
       <section className="card overflow-hidden" aria-labelledby="acc-pending">
         <h2 id="acc-pending" className="border-b border-brand-border px-4 py-3 font-bold">
           {t('admin.access.pending')} ({pending.length})
@@ -320,6 +356,20 @@ export default function AdminAccess() {
           </ul>
         </section>
       )}
+
+      <section className="card grid gap-3 p-4" aria-labelledby="acc-role-differences">
+        <h2 id="acc-role-differences" className="font-bold">{t('admin.access.roleDifferences')}</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <article className="rounded-xl border border-brand-border bg-white p-3">
+            <h3 className="text-sm font-bold">{t('admin.access.roleAdmin')}</h3>
+            <p className="mt-1 text-sm text-brand-subtle">{t('admin.access.roleAdminDetails')}</p>
+          </article>
+          <article className="rounded-xl border border-brand-primary/20 bg-brand-primary/5 p-3">
+            <h3 className="text-sm font-bold text-brand-primary">{t('admin.access.roleSuper')}</h3>
+            <p className="mt-1 text-sm text-brand-subtle">{t('admin.access.roleSuperDetails')}</p>
+          </article>
+        </div>
+      </section>
     </div>
   );
 }

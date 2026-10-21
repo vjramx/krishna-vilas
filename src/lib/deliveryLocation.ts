@@ -39,26 +39,3 @@ export function googleMapsDirectionsUrl(destination: {
   }
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target)}`;
 }
-
-export function describeGeolocationError(error: Pick<GeolocationPositionError, 'code'>): 'permission_denied' | 'unavailable' | 'timeout' | 'unknown' {
-  switch (error.code) {
-    case 1: return 'permission_denied';
-    case 2: return 'unavailable';
-    case 3: return 'timeout';
-    default: return 'unknown';
-  }
-}
-
-export function isGoodLocationAccuracy(accuracyMeters: number): boolean {
-  return Number.isFinite(accuracyMeters) && accuracyMeters >= 0 && accuracyMeters <= 100;
-}
-
-export function getCurrentLocation(geolocation: Pick<Geolocation, 'getCurrentPosition'>): Promise<GeolocationPosition> {
-  return new Promise((resolve, reject) => {
-    geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
-    });
-  });
-}

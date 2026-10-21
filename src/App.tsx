@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 import { LanguageProvider } from '@/context/LanguageContext';
 import { CartProvider } from '@/context/CartContext';
-import { Spinner, SnackbarHost } from '@/components/ui';
+import { SnackbarHost } from '@/components/ui';
 import OrderNotifier from '@/components/OrderNotifier';
 import { RouteEffects } from '@/components/AppChrome';
 import { OfflineBanner } from '@/components/OfflineBanner';
@@ -33,19 +33,11 @@ const AgentCod = lazy(() => import('@/pages/agent/AgentHome').then((m) => ({ def
 const AgentDeliveryPage = lazy(() => import('@/pages/agent/AgentDeliveryPage'));
 const AgentPreview = lazy(() => import('@/pages/agent/AgentPreview'));
 
-function Splash() {
-  return (
-    <div className="grid min-h-dvh place-items-center bg-brand-bg" role="status">
-      <Spinner label="loading" />
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <LanguageProvider>
       <CartProvider>
-        <Suspense fallback={<Splash />}>
+        <Suspense fallback={null}>
           <RouteEffects>
             <Routes>
               {/* Customer */}

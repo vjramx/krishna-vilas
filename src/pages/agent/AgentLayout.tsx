@@ -1,4 +1,4 @@
-import { NavLink, Navigate, Outlet } from 'react-router-dom';
+import { NavLink, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { Loader2, Bike, ClipboardCheck, HandCoins } from 'lucide-react';
@@ -6,7 +6,62 @@ import { Spinner } from '@/components/ui';
 import { BrandLogo } from '@/components/BrandLogo';
 import { supabase } from '@/lib/supabase';
 import { haptic } from '@/lib/haptics';
+import { applyAssignmentDelta } from '@/lib/agentAssignments';
+import { showSnackbar } from '@/components/ui';
 import { useEffect, useState } from 'react';
+import type { Order } from '@/types/db';
+
+/**
+ * Rings when the backend auto-dispatches an order to this agent (admin accept
+ * → least-loaded active agent). Mounted once for the logged-in agent so the
+ * alert fires on ANY tab — the Assigned list only exists on its own route,
+ * and an assignment landing while the agent is working the Active tab must
+ * never be missed. Seeds known ids first so a fresh mount stays quiet about
+ * assignments made before the app opened; every later realtime change goes
+ * through the pure delta classifier, so accepting/declining/reassignment
+ * keeps the alert state consistent even across reconnects.
+ */
+function AgentAssignmentNotifier() {
+  const { userId } = useAuth();
+  const { t } = useLanguage();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!userId) return;
+    let seeded = false;
+    const known = new Set<string>();
+    let cancelled = false;
+    void supabase
+      .from('orders')
+      .select('id, agent_id, assignment_status')
+      .eq('agent_id', userId)
+      .in('assignment_status', ['assigned'])
+      .then(({ data }) => {
+        if (cancelled) return;
+        for (const row of (data as { id: string }[]) ?? []) known.add(row.id);
+        seeded = true;
+      });
+    const channel = supabase
+      .channel('agent-assign-notify')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+        const o = payload.new as Order | null;
+        // DELETE carries only the old row: it cannot be a fresh assignment.
+        if (!o || !o.id) return;
+        const fired = applyAssignmentDelta(known, o, userId, { seeded });
+        if (!fired) return;
+        haptic(30);
+        showSnackbar(`${o.order_number} · ${t('agent.newAssignment')}`, {
+          label: t('agent.accept'),
+          onAction: () => navigate('/agent'),
+        });
+      })
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [userId, t, navigate]);
+  return null;
+}
 
 export function AgentLayout() {
   const { role, loading } = useAuth();
@@ -39,6 +94,7 @@ export function AgentLayout() {
 
   return (
     <div className="min-h-dvh bg-brand-bg">
+      <AgentAssignmentNotifier />
       <header
         className="sticky top-0 z-30 bg-brand-secondary text-white shadow-elev1"
         style={{ paddingTop: 'var(--safe-top)' }}

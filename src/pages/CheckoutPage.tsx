@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useCart } from '@/context/CartContext';
+import type { MenuItem } from '@/types/db';
 import { useHotelSettings } from '@/hooks/useHotelSettings';
 import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
@@ -10,9 +11,7 @@ import { Sheet, BottomActionBar } from '@/components/ui';
 import { cartTotalsPaise, formatRupee, rupeesToPaise } from '@/lib/money';
 import { parseKvError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
-import { DeliveryMap } from '@/components/DeliveryMap';
-import { describeGeolocationError, getCurrentLocation, isGoodLocationAccuracy, isValidCoordinates, type ConfirmedDeliveryLocation, type Coordinates } from '@/lib/deliveryLocation';
-import { BadgeCheck, ChevronRight, Crosshair, LogIn, MapPin, Wallet } from 'lucide-react';
+import { BadgeCheck, LogIn, Wallet } from 'lucide-react';
 
 const checkoutSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -27,16 +26,6 @@ const DETAILS_KEY = 'kv-delivery-details';
 const DRAFT_KEY = 'kv-checkout-draft';
 
 type FormState = { name: string; phone: string; address: string; area: string; landmark: string; instructions: string; save: boolean };
-const LOCATION_DRAFT_KEY = 'kv-checkout-location';
-
-function readLocationDraft(): { location: ConfirmedDeliveryLocation | null; confirmed: boolean } {
-  try {
-    const raw = JSON.parse(sessionStorage.getItem(LOCATION_DRAFT_KEY) ?? 'null') as { location?: ConfirmedDeliveryLocation; confirmed?: boolean } | null;
-    const valid = raw?.location && isValidCoordinates(raw.location) ? raw.location : null;
-    const confirmed = !!valid && raw?.confirmed === true;
-    return { location: confirmed ? valid : null, confirmed };
-  } catch { return { location: null, confirmed: false }; }
-}
 
 /** Idempotency key survives reloads until order creation is confirmed. */
 function readPendingKey(): string | null {
@@ -52,6 +41,50 @@ function clearPendingKey(): void {
   } catch {
     /* ignore */
   }
+}
+
+function createIdempotencyKey(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function scrollIntoViewIfAvailable(element: Element | null, options: ScrollIntoViewOptions): void {
+  if (element && typeof element.scrollIntoView === 'function') element.scrollIntoView(options);
+}
+
+interface CheckoutOffer {
+  discount_type: 'percent' | 'flat';
+  discount_value: number | string;
+  scope: 'item' | 'category' | 'all';
+  target_id: string | null;
+}
+
+function checkoutDiscounts(
+  lines: { itemId: string; unitPaise: number; quantity: number }[],
+  items: Pick<MenuItem, 'id' | 'category_id'>[],
+  offers: CheckoutOffer[],
+): Record<string, number> {
+  return Object.fromEntries(lines.map((line) => {
+    const item = items.find((candidate) => candidate.id === line.itemId);
+    const discount = offers.reduce((best, offer) => {
+      const applies = offer.scope === 'all'
+        || (offer.scope === 'item' && offer.target_id === line.itemId)
+        || (offer.scope === 'category' && offer.target_id === item?.category_id);
+      if (!applies) return best;
+      const value = Number(offer.discount_value);
+      if (!Number.isFinite(value) || value <= 0) return best;
+      const amount = offer.discount_type === 'percent'
+        ? Math.round(line.unitPaise * value / 100)
+        : rupeesToPaise(value);
+      return Math.max(best, Math.min(line.unitPaise, amount));
+    }, 0);
+    return [line.itemId, discount];
+  }));
 }
 
 export default function CheckoutPage() {
@@ -84,7 +117,7 @@ export default function CheckoutPage() {
       area: text(saved.area),
       landmark: text(saved.landmark),
       instructions: text(saved.instructions),
-      save: saved.save !== false,
+      save: saved.save === true,
     };
   });
   useEffect(() => {
@@ -94,81 +127,92 @@ export default function CheckoutPage() {
       // Checkout remains usable when storage is unavailable.
     }
   }, [form]);
-  const [location, setLocation] = useState<ConfirmedDeliveryLocation | null>(() => readLocationDraft().location);
-  const [locationConfirmed, setLocationConfirmed] = useState(() => readLocationDraft().confirmed);
-  const [mapDraft, setMapDraft] = useState<ConfirmedDeliveryLocation | null>(null);
-  useEffect(() => {
-    try { sessionStorage.setItem(LOCATION_DRAFT_KEY, JSON.stringify({ location, confirmed: locationConfirmed })); } catch { /* best effort session draft */ }
-  }, [location, locationConfirmed]);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [catalogLoading, setCatalogLoading] = useState(cart.lines.length > 0);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [activeOffers, setActiveOffers] = useState<CheckoutOffer[]>([]);
+  const [catalogItems, setCatalogItems] = useState<Pick<MenuItem, 'id' | 'category_id'>[]>([]);
+  const catalogItemIds = cart.lines.map((line) => line.itemId).join('|');
+  const syncCartPrices = cart.syncPrices;
+  const markCartUnavailable = cart.markUnavailable;
   const [submitting, setSubmitting] = useState(false);
+  const submitLockRef = useRef(false);
+  const pendingIdempotencyKeyRef = useRef<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [closedInfo, setClosedInfo] = useState<{ message: string } | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [locationNotice, setLocationNotice] = useState<string | null>(null);
-  const [mapOpen, setMapOpen] = useState(false);
 
   const feePaise = settings ? rupeesToPaise(settings.delivery_fee) : 0;
   const minTotal = settings ? rupeesToPaise(settings.min_order_total) : 0;
-  const totals = useMemo(() => cartTotalsPaise(cart.lines, feePaise), [cart.lines, feePaise]);
+  const discountPerUnitPaise = useMemo(
+    () => checkoutDiscounts(cart.lines, catalogItems, activeOffers),
+    [cart.lines, catalogItems, activeOffers],
+  );
+  const totals = useMemo(() => cartTotalsPaise(cart.lines, feePaise, discountPerUnitPaise), [cart.lines, feePaise, discountPerUnitPaise]);
+
+  useEffect(() => {
+    if (!catalogItemIds) {
+      setCatalogLoading(false);
+      setCatalogError(null);
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    setCatalogLoading(true);
+    setCatalogError(null);
+    void (async () => {
+      try {
+        const now = new Date().toISOString();
+        const [catalogResult, offersResult] = await Promise.all([
+          supabase.from('menu_items')
+            .select('id, category_id, price, name_en, name_kn, is_active, is_available')
+            .in('id', catalogItemIds.split('|'))
+            .abortSignal(controller.signal),
+          supabase.from('special_offers')
+            .select('discount_type, discount_value, scope, target_id')
+            .eq('is_active', true)
+            .lte('starts_at', now)
+            .gte('ends_at', now)
+            .abortSignal(controller.signal),
+        ]);
+        if (!active) return;
+        if (catalogResult.error || offersResult.error) {
+          setCatalogError(catalogResult.error?.message ?? offersResult.error?.message ?? 'catalog fetch failed');
+          return;
+        }
+        const items = (catalogResult.data ?? []) as Pick<MenuItem, 'id' | 'category_id' | 'price' | 'name_en' | 'name_kn' | 'is_active' | 'is_available'>[];
+        setCatalogItems(items.map(({ id, category_id }) => ({ id, category_id })));
+        setActiveOffers((offersResult.data ?? []) as CheckoutOffer[]);
+        syncCartPrices(items);
+        const foundIds = new Set(items.map((item) => item.id));
+        const unavailableIds = catalogItemIds.split('|').filter((itemId) => {
+          const item = items.find((candidate) => candidate.id === itemId);
+          return !foundIds.has(itemId) || !item?.is_active || !item.is_available;
+        });
+        markCartUnavailable(unavailableIds);
+      } catch (error: unknown) {
+        if (active) setCatalogError(error instanceof Error ? error.message : String(error));
+      } finally {
+        window.clearTimeout(timeout);
+        if (active) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [catalogAttempt, catalogItemIds, markCartUnavailable, syncCartPrices]);
   const belowMin = minTotal > 0 && totals.subtotal < minTotal;
+  const remainingToMin = Math.max(0, minTotal - totals.subtotal);
 
+  // Zomato/Swiggy-style: the confirmed pin is the delivery point; the address
+  // text (street + house details) describes it. Editing the text therefore must
+  // NOT discard the pin — the customer can re-target with Change location.
   const save = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
-  function openMapPicker(seed = location) {
-    setMapDraft(seed);
-    setLocationError(null);
-    setMapOpen(true);
-  }
-
-  function closeMapPicker() {
-    setMapOpen(false);
-    setMapDraft(null);
-  }
-
-  function confirmMapPicker() {
-    if (!mapDraft) return;
-    setLocation({ ...mapDraft, confirmedAt: new Date().toISOString() });
-    setLocationConfirmed(true);
-    setMapOpen(false);
-    setMapDraft(null);
-    setLocationError(null);
-    setLocationNotice(t('checkout.locationSelected'));
-  }
-
-  async function locateCustomer() {
-    setLocationError(null);
-    setLocationNotice(null);
-    if (!navigator.geolocation) { setLocationError(t('checkout.locationUnsupported')); return; }
-    if (!window.isSecureContext) { setLocationError(t('checkout.locationHttps')); return; }
-    setLocating(true);
-    try {
-      const position = await getCurrentLocation(navigator.geolocation);
-      const coords = { latitude: position.coords.latitude, longitude: position.coords.longitude };
-      if (!isValidCoordinates(coords)) throw new Error('invalid coordinates');
-      const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null;
-      const selected: ConfirmedDeliveryLocation = {
-        ...coords,
-        accuracyMeters: accuracy,
-        source: 'browser_geolocation',
-        confirmedAt: new Date().toISOString(),
-      };
-      setMapDraft(selected);
-      setLocationNotice(accuracy !== null && isGoodLocationAccuracy(accuracy) ? t('checkout.locationFound') : t('checkout.locationPoorAccuracy', { accuracy: accuracy === null ? '—' : Math.round(accuracy) }));
-      setMapOpen(true);
-    } catch (error) {
-      const code = typeof error === 'object' && error && 'code' in error ? Number((error as { code: unknown }).code) : -1;
-      const key = describeGeolocationError({ code } as GeolocationPositionError);
-      setLocationError(t(key === 'permission_denied' ? 'checkout.locationDenied' : key === 'timeout' ? 'checkout.locationTimeout' : key === 'unavailable' ? 'checkout.locationUnavailable' : 'checkout.locationGeneric'));
-    } finally { setLocating(false); }
-  }
-
-  function adjustMapPin(next: Coordinates) {
-    if (!isValidCoordinates(next)) return;
-    setMapDraft({ ...next, accuracyMeters: null, source: 'map_pin', confirmedAt: new Date().toISOString() });
-  }
-
   async function placeOrder() {
+    if (submitting || submitLockRef.current || catalogLoading || catalogError || cart.unavailableIds.length > 0) return;
     const parsed = checkoutSchema.safeParse(form);
     const nextErrors: Partial<Record<keyof FormState, string>> = {};
     if (!parsed.success) {
@@ -187,7 +231,7 @@ export default function CheckoutPage() {
       requestAnimationFrame(() => {
         const first = document.querySelector<HTMLElement>('[data-invalid="true"]');
         first?.focus();
-        first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        scrollIntoViewIfAvailable(first, { behavior: 'smooth', block: 'center' });
       });
       return;
     }
@@ -199,16 +243,16 @@ export default function CheckoutPage() {
     }
 
     // Idempotency: reuse the generated key if a previous attempt never got a response.
-    let idem = readPendingKey();
-    if (!idem) {
-      idem = crypto.randomUUID();
-      try {
-        window.sessionStorage.setItem('kv-order-pending', idem);
-      } catch {
-        /* ignore */
-      }
+    let idem = pendingIdempotencyKeyRef.current ?? readPendingKey();
+    if (!idem) idem = createIdempotencyKey();
+    pendingIdempotencyKeyRef.current = idem;
+    try {
+      window.sessionStorage.setItem('kv-order-pending', idem);
+    } catch {
+      // Keep the key in memory for safe retries in WebViews with blocked storage.
     }
 
+    submitLockRef.current = true;
     setSubmitting(true);
     setServerError(null);
     const payload = {
@@ -220,53 +264,84 @@ export default function CheckoutPage() {
       p_landmark: form.landmark?.trim() || null,
       p_instructions: form.instructions?.trim() || null,
       p_idempotency_key: idem,
-      p_delivery_latitude: location?.latitude ?? null,
-      p_delivery_longitude: location?.longitude ?? null,
-      p_location_accuracy_meters: location?.accuracyMeters ?? null,
-      p_location_source: location?.source ?? 'manual_address',
-      p_location_confirmed_at: locationConfirmed && location ? location.confirmedAt : null,
+      // Address-only checkout: no pin is captured in the browser, so the exact
+      // coordinates are saved by the backend as null and the source stays
+      // 'manual_address' (accepted by place_order_with_location).
+      p_delivery_latitude: null,
+      p_delivery_longitude: null,
+      p_location_accuracy_meters: null,
+      p_location_source: 'manual_address',
+      p_location_confirmed_at: null,
       p_delivery_details: {},
     };
-    const { data, error } = await supabase.rpc('place_order_with_location', payload);
-    if (error) {
-      const kv = parseKvError(error);
-      // A network failure is ambiguous: the server may have committed but the
-      // response was lost. Keep the idempotency key so retry cannot duplicate.
-      if (kv.key !== 'err.network') clearPendingKey();
-      if (kv.key === 'err.hotelClosed' || kv.key === 'err.notAccepting') {
-        setClosedInfo({ message: t(kv.key) });
-        setSubmitting(false);
+    try {
+      const { data, error } = await supabase.rpc('place_order_with_location', payload);
+      if (error) {
+        const kv = parseKvError(error);
+        // A network failure is ambiguous: the server may have committed but the
+        // response was lost. Keep the idempotency key so retry cannot duplicate.
+        if (kv.key !== 'err.network') {
+          clearPendingKey();
+          pendingIdempotencyKeyRef.current = null;
+        }
+        if (kv.key === 'err.hotelClosed' || kv.key === 'err.notAccepting') {
+          setClosedInfo({ message: t(kv.key) });
+          return;
+        }
+        const message = kv.key === 'err.minOrder' && kv.detail
+          ? t('checkout.minFoodSubtotal', {
+              amount: formatRupee(rupeesToPaise(kv.detail), { withSymbol: false }),
+              more: formatRupee(Math.max(0, rupeesToPaise(kv.detail) - totals.subtotal), { withSymbol: false }),
+            })
+          : kv.detail ? `${t(kv.key)} (${kv.detail})` : t(kv.key);
+        setServerError(message);
+        requestAnimationFrame(() =>
+          scrollIntoViewIfAvailable(document.querySelector('[data-checkout-error]'), { behavior: 'smooth', block: 'center' }),
+        );
         return;
       }
-      setServerError(kv.detail ? `${t(kv.key)} (${kv.detail})` : t(kv.key));
-      setSubmitting(false);
-      requestAnimationFrame(() =>
-        document.querySelector('[data-checkout-error]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
-      );
-      return;
-    }
-    // Backend confirmed — now (and only now) clear the cart.
-    clearPendingKey();
-    try {
-      window.sessionStorage.removeItem(DRAFT_KEY);
-      window.sessionStorage.removeItem(LOCATION_DRAFT_KEY);
-    } catch {
-      // Storage may be unavailable.
-    }
-    cart.clear();
-    if (form.save) {
-      try {
-        const { save: _s, ...details } = form;
-        window.localStorage.setItem(DETAILS_KEY, JSON.stringify(details));
-        void _s;
-        if ( userId) {
-          await supabase.from('profiles').upsert({ id: userId, display_name: form.name.trim(), phone: form.phone.trim() });
-        }
-      } catch {
-        /* non-critical */
+      const orderId = data && typeof data === 'object' && 'order_id' in data && typeof data.order_id === 'string'
+        ? data.order_id
+        : null;
+      if (!orderId) {
+        // A malformed/empty response is ambiguous. Keep the cart and key so a
+        // retry safely resolves through the database idempotency constraint.
+        setServerError(t('err.generic'));
+        return;
       }
+      // Backend confirmed — now (and only now) clear the cart.
+      clearPendingKey();
+      pendingIdempotencyKeyRef.current = null;
+      try {
+        window.sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // Storage may be unavailable.
+      }
+      cart.clear();
+      if (form.save) {
+        try {
+          const { save: _s, ...details } = form;
+          window.localStorage.setItem(DETAILS_KEY, JSON.stringify(details));
+          void _s;
+          if (userId) {
+            await supabase.from('profiles').upsert({ id: userId, display_name: form.name.trim(), phone: form.phone.trim() });
+          }
+        } catch {
+          /* non-critical */
+        }
+      }
+      navigate(`/order/${orderId}?confirmed=1`, { replace: true });
+    } catch (error) {
+      const kv = parseKvError(error);
+      // Any thrown request is ambiguous: retain the idempotency key for a safe retry.
+      setServerError(t(kv.key));
+      requestAnimationFrame(() =>
+        scrollIntoViewIfAvailable(document.querySelector('[data-checkout-error]'), { behavior: 'smooth', block: 'center' }),
+      );
+    } finally {
+      submitLockRef.current = false;
+      setSubmitting(false);
     }
-    navigate(`/order/${(data as { order_id: string }).order_id}?confirmed=1`, { replace: true });
   }
 
   const closedWindow =
@@ -280,18 +355,28 @@ export default function CheckoutPage() {
   const settingsUnavailable = !settingsLoading && !settings;
   const closed = !!settings && !settings.is_accepting_orders;
   const minOrderNotice = belowMin
-    ? t('checkout.minOrder', {
+    ? t('checkout.minFoodSubtotal', {
         amount: formatRupee(minTotal, { withSymbol: false }),
-        more: formatRupee(minTotal - totals.subtotal, { withSymbol: false }),
+        more: formatRupee(remainingToMin, { withSymbol: false }),
       })
     : null;
-  const blockedReason = settingsUnavailable
-    ? t('err.network')
-    : closed
-      ? t('checkout.notAccepting')
-      : minOrderNotice;
+  const blockedReason = authLoading || (settingsLoading && !settings) || catalogLoading
+    ? t('common.loading')
+    : catalogError
+      ? t('err.network')
+      : cart.unavailableIds.length > 0
+        ? t('cart.unavailableInCart')
+        : settingsUnavailable
+          ? t('err.network')
+          : closed
+            ? t('checkout.notAccepting')
+            : cart.lines.length === 0
+              ? t('err.itemsRequired')
+              : belowMin
+                ? t('checkout.minFoodSubtotalShort', { more: formatRupee(remainingToMin, { withSymbol: false }) })
+                : null;
   const canSubmit =
-    !submitting && !authLoading && !!session && !!settings && !settingsLoading && !settingsUnavailable && !closed && !belowMin && cart.lines.length > 0;
+    !submitting && !authLoading && !!session && !!settings && !settingsLoading && !settingsUnavailable && !catalogLoading && !catalogError && cart.unavailableIds.length === 0 && !closed && !belowMin && cart.lines.length > 0;
 
   return (      <div className="min-h-dvh bg-brand-bg">
       <TopBackBar title={t('checkout.title')} />
@@ -307,6 +392,22 @@ export default function CheckoutPage() {
         {closed && (
           <div role="alert" className="card mb-3 p-3 text-sm text-brand-error">{t('checkout.notAccepting')}</div>
         )}
+        {cart.unavailableIds.length > 0 && (
+          <div className="card mb-3 border-brand-error/30 bg-brand-errorBg/50 p-3 text-sm" role="alert">
+            <p className="text-brand-error">{t('cart.unavailableInCart')}</p>
+            <button type="button" className="btn-secondary mt-2 min-h-[44px] text-sm" onClick={() => cart.unavailableIds.forEach((itemId) => cart.remove(itemId))}>
+              {t('cart.removeUnavailable')}
+            </button>
+          </div>
+        )}
+        {catalogError && (
+          <div className="card mb-3 p-3 text-sm" role="alert">
+            <p className="text-brand-error">{t('err.network')}</p>
+            <button type="button" className="btn-secondary mt-2 min-h-[44px] text-sm" onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>
+              {t('common.retry')}
+            </button>
+          </div>
+        )}
 
         <section className="card p-4" aria-labelledby="ck-items">
           <h2 id="ck-items" className="mb-2 font-bold">{t('checkout.summary')}</h2>
@@ -320,12 +421,13 @@ export default function CheckoutPage() {
           </ul>
           <dl className="mt-2 grid gap-1 border-t border-brand-border pt-2 text-sm">
             <div className="flex justify-between"><dt>{t('cart.itemTotal')}</dt><dd>{formatRupee(totals.subtotal)}</dd></div>
+            {totals.discount > 0 && <div className="flex justify-between text-brand-success"><dt>{t('cart.discount')}</dt><dd>-{formatRupee(totals.discount)}</dd></div>}
             <div className="flex justify-between"><dt>{t('cart.deliveryFee')}</dt><dd>{formatRupee(totals.fee)}</dd></div>
             <div className="flex justify-between font-bold"><dt>{t('common.total')}</dt><dd>{formatRupee(totals.total)}</dd></div>
           </dl>
           {belowMin && (
             <p className="mt-2 text-xs text-brand-warn">
-              {t('checkout.minOrder', { amount: formatRupee(minTotal, { withSymbol: false }), more: formatRupee(minTotal - totals.subtotal, { withSymbol: false }) })}
+              {minOrderNotice}
             </p>
           )}
         </section>
@@ -357,8 +459,17 @@ export default function CheckoutPage() {
           </div>
           <div>
             <label className="label" htmlFor="ck-phone">{t('checkout.phone')}</label>
-            <input id="ck-phone" className="input tabular-nums" data-invalid={!!errors.phone} inputMode="tel" autoComplete="tel"
-              maxLength={10} value={form.phone} onChange={(e) => save({ phone: e.target.value.replace(/[^0-9]/g, '') })} aria-invalid={!!errors.phone} />
+            <div className="flex items-stretch" data-phone-group>
+              <span
+                aria-hidden="true"
+                className="grid shrink-0 place-items-center rounded-l-xl border border-r-0 border-brand-border bg-brand-bg px-3 text-sm font-semibold text-brand-subtle"
+              >
+                +91
+              </span>
+              <input id="ck-phone" className="input rounded-l-none tabular-nums" data-invalid={!!errors.phone} inputMode="tel" autoComplete="tel national"
+                placeholder="9876543210" maxLength={10} value={form.phone} onChange={(e) => save({ phone: e.target.value.replace(/[^0-9]/g, '') })} aria-invalid={!!errors.phone} />
+            </div>
+            <p className="mt-0.5 text-xs text-brand-subtle">{t('checkout.phoneHint')}</p>
             {errors.phone && <p className="mt-1 text-xs text-brand-error" role="alert">{errors.phone}</p>}
           </div>
           <div>
@@ -378,43 +489,6 @@ export default function CheckoutPage() {
             <label className="label" htmlFor="ck-landmark">{t('checkout.landmark')} <span className="font-normal text-brand-subtle">{t('common.optional')}</span></label>
             <input id="ck-landmark" className="input" maxLength={80} value={form.landmark} onChange={(e) => save({ landmark: e.target.value })} />
           </div>
-          <section className="grid gap-2 rounded-2xl border border-brand-border bg-white p-3" data-location-picker aria-labelledby="delivery-location-heading">
-            <div>
-              <h2 id="delivery-location-heading" className="text-sm font-bold">{t('checkout.locationHeading')}</h2>
-              <p className="mt-0.5 text-xs text-brand-subtle">{t('checkout.locationPrivacy')}</p>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-brand-border divide-y divide-brand-border">
-              <button type="button" aria-label={t('checkout.useCurrentLocation')} className="flex min-h-[56px] w-full items-center gap-3 px-3 text-left active:bg-brand-bg disabled:opacity-60" onClick={() => void locateCustomer()} disabled={locating}>
-                <Crosshair size={19} className="shrink-0 text-brand-primary" aria-hidden="true" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold">{locating ? t('checkout.locating') : t('checkout.useCurrentLocation')}</span>
-                  <span className="block text-xs text-brand-subtle">{t('checkout.locationCurrentSubtitle')}</span>
-                </span>
-                {locating ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-border border-t-brand-primary" role="status" aria-label={t('checkout.locating')} /> : <ChevronRight size={18} className="text-brand-subtle" aria-hidden="true" />}
-              </button>
-              <button type="button" aria-label={t('checkout.chooseMap')} className="flex min-h-[56px] w-full items-center gap-3 px-3 text-left active:bg-brand-bg" onClick={() => openMapPicker()}>
-                <MapPin size={19} className="shrink-0 text-brand-primary" aria-hidden="true" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold">{t('checkout.chooseMap')}</span>
-                  <span className="block text-xs text-brand-subtle">{t('checkout.mapSubtitle')}</span>
-                </span>
-                <ChevronRight size={18} className="text-brand-subtle" aria-hidden="true" />
-              </button>
-            </div>
-            {locationError && <p className="rounded-lg bg-brand-warnBg/60 px-2.5 py-1.5 text-xs leading-snug text-brand-warn" role="alert">{locationError}</p>}
-            {locationNotice && !locationConfirmed && <p className="text-xs text-brand-success" role="status">{locationNotice}</p>}
-            {locationConfirmed && location && (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-brand-successBg px-2.5 py-2" role="status">
-                <BadgeCheck size={17} className="shrink-0 text-brand-success" aria-hidden="true" />
-                <span className="min-w-0 flex-1 text-xs font-semibold text-brand-success">
-                  <span className="block">{t('checkout.locationSelected')}</span>
-                  <span className="block font-normal">{t('checkout.reviewLocation')}</span>
-                </span>
-                <button type="button" className="min-h-[40px] px-2 text-xs font-semibold text-brand-primary" onClick={() => openMapPicker(location)}>{t('checkout.changeLocation')}</button>
-                <button type="button" className="min-h-[40px] px-2 text-xs font-semibold text-brand-subtle" onClick={() => { setLocation(null); setLocationConfirmed(false); setLocationNotice(null); setLocationError(null); }}>{t('checkout.removeLocation')}</button>
-              </div>
-            )}
-          </section>
 
           <div>
             <label className="label" htmlFor="ck-instr">{t('checkout.instructions')} <span className="font-normal text-brand-subtle">{t('common.optional')}</span></label>
@@ -453,7 +527,7 @@ export default function CheckoutPage() {
           <p className="text-[11px] font-medium text-brand-subtle">{t('common.total')}</p>
           <p className="truncate text-lg font-extrabold leading-tight">{formatRupee(totals.total)}</p>
           {!signedOut && blockedReason && (
-            <p className="truncate text-[10px] font-semibold text-brand-warn">{blockedReason}</p>
+            <p id="checkout-submit-blocked" className="truncate text-[10px] font-semibold text-brand-warn">{blockedReason}</p>
           )}
         </div>
         {signedOut ? (
@@ -461,20 +535,11 @@ export default function CheckoutPage() {
             {t('common.signIn')}
           </Link>
         ) : (
-          <button form="checkout-form" type="submit" className="btn-primary min-w-0 flex-[1.5] text-[15px]" disabled={!canSubmit}>
+          <button form="checkout-form" type="submit" className="btn-primary min-h-12 min-w-[132px] flex-[1.5] whitespace-nowrap px-3 text-[15px]" disabled={!canSubmit} aria-describedby={!canSubmit && blockedReason ? 'checkout-submit-blocked' : undefined} aria-busy={submitting}>
             {submitting ? t('checkout.placing') : t('checkout.placeOrder')}
           </button>
         )}
       </BottomActionBar>
-
-      <Sheet open={mapOpen} onClose={closeMapPicker} title={t('checkout.chooseMap')}>
-        <div className="grid gap-3">
-          <p className="text-sm text-brand-subtle">{t('checkout.mapInstructions')}</p>
-          <DeliveryMap coordinates={mapDraft} onChange={adjustMapPin} interactive height={360} label={t('checkout.mapLabel')} />
-          {mapDraft && <p className="text-xs text-brand-subtle">{t('checkout.pinCoordinates', { latitude: mapDraft.latitude.toFixed(6), longitude: mapDraft.longitude.toFixed(6) })}</p>}
-          <button type="button" className="btn-primary w-full" disabled={!mapDraft} onClick={confirmMapPicker}>{t('checkout.confirmPin')}</button>
-        </div>
-      </Sheet>
 
       <Sheet open={!!closedInfo} onClose={() => setClosedInfo(null)} title={t('confirm.title')}>
         <p className="text-sm" role="alert">{closedInfo?.message}{closedWindow ? ` (${t('checkout.closed', { hours: closedWindow })})` : ''}</p>

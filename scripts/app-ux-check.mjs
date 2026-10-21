@@ -233,9 +233,9 @@ await page.getByRole('button', { name: 'English', exact: true }).click();
 await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('h3', { timeout: 20000 });
 
-/* --------------------------------------------------- splash hands off cleanly */
+/* ------------------------------------------------------------- no splash */
 const splash = await page.locator('#boot-splash').count();
-check('launch splash is removed once the app paints', splash === 0);
+check('launch splash is not rendered', splash === 0);
 
 await browser.close();
 log(failures === 0 ? '\nAPP UX CHECKS PASSED' : `\n${failures} APP UX CHECK(S) FAILED`);

@@ -57,7 +57,12 @@ Verified live: `select email, role from public.admin_users;`
 Supabase maps the Postgres role from the JWT `role` claim; Firebase tokens don't
 carry one, so requests run as the `anon` Postgres role. This project's RLS policies
 are claim-based and granted `to public` (`is_allowed_issuer()` / `is_administrator()`
-/ `kv_subject()`), so functionality does not depend on that claim. If policies are
+/ `kv_subject()`), so functionality does not depend on that claim. **Every
+admin/staff/customer RPC must therefore be granted execute to `anon` as well as
+`authenticated`** — the same pattern as `place_order`. Granting one to
+`authenticated` only makes it invisible to all customers (HTTP 401 at call time).
+`0007_delivery_location.sql` (fixed by `0011_grant_checkout_rpc_anon.sql`) made
+exactly that mistake on `place_order_with_location`. If policies are
 ever tightened `to authenticated`, run
 `node scripts/set-firebase-role-claims.mjs <serviceAccountKey.json>` first.
 

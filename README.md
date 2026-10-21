@@ -152,7 +152,7 @@ chrome, no rubber-band/pull-to-refresh from the browser, and safe-area padding o
 
 | Behaviour | Where |
 | --- | --- |
-| Launch splash handed off to the app | `index.html` (`#boot-splash`) → removed in `src/main.tsx` after first paint |
+| App startup | No custom splash overlay; platform-controlled PWA/native launch screens may still appear |
 | Material bottom sheet (handle, scroll body) | `Sheet` in `src/components/ui.tsx` |
 | **Hardware back closes the sheet** instead of leaving the screen | `Sheet` pushes/pops a history entry |
 | Snackbar with an action (e.g. *View cart*) | `showSnackbar` + `SnackbarHost` |
@@ -175,7 +175,7 @@ chrome, no rubber-band/pull-to-refresh from the browser, and safe-area padding o
    - **File uploads** (menu admin image upload): implement `WebChromeClient.onShowFileChooser` with the provided file-chooser callback.
    - **Safe areas**: the site already consumes `env(safe-area-inset-*)`; make the activity fullscreen/edge-to-edge (`WindowCompat.setDecorFitsSystemWindows(window, false)`).
    - **Status bar**: the app paints `#C83E24` via `<meta name="theme-color">`; transparent status bar + light icons match the app bar.
-   - **Splash**: show a native splash with the same brand mark (`public/icon-512.png`) so the hand-off is seamless, then let the in-app splash finish.
+   - **Splash**: Android may show its platform-controlled native launch screen before the WebView starts.
    - **Bundled assets** (optional): if you ship `dist/` inside the APK and load it with `file:///android_asset/index.html`, the app automatically switches to hash routing — no server rewrites needed.
    - Enable `WebView.setWebContentsDebuggingEnabled(false)` in release builds. Do not register any `@JavascriptInterface` unless strictly necessary and reviewed.
 4. Optional notifications: Android system notifications for new orders need a push pipeline (e.g. FCM + edge function); not implemented.

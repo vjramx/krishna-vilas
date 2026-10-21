@@ -5,25 +5,24 @@ import { useLanguage } from '@/context/LanguageContext';
 import { TopBackBar } from '@/components/nav';
 import { EmptyState, ErrorState, OrderStatusBadge, Sheet, showSnackbar, Spinner } from '@/components/ui';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
-import { supabase } from '@/lib/supabase';
+import { publicImageUrl, supabase } from '@/lib/supabase';
 import { parseKvError } from '@/lib/errors';
-import { CheckCircle2, Circle, XCircle } from 'lucide-react';
-import type { OrderStatus } from '@/types/db';
+import { CheckCircle2, Circle, Clock, Utensils, XCircle } from 'lucide-react';
+import type { Order, OrderStatus } from '@/types/db';
 import { OrderDestination } from '@/components/OrderDestination';
+import { customerOrderStatusLabel, customerVisibleOrderStatus } from '@/lib/orderPresentation';
+import { DeliveryRideAnimation } from '@/components/DeliveryRide';
 
-const TIMELINE: { key: OrderStatus; labelKey: string }[] = [
-  { key: 'pending', labelKey: 'order.status.pending' },
-  { key: 'confirmed', labelKey: 'order.status.confirmed' },
-  { key: 'preparing', labelKey: 'order.status.preparing' },
-  { key: 'ready', labelKey: 'order.status.ready' },
-  { key: 'out_for_delivery', labelKey: 'order.status.out_for_delivery' },
-  { key: 'delivered', labelKey: 'order.status.delivered' },
+const TIMELINE: { key: OrderStatus; labelKey: string; timestamp: keyof Pick<Order, 'created_at' | 'confirmed_at' | 'delivered_at'> }[] = [
+  { key: 'pending', labelKey: 'order.status.pending', timestamp: 'created_at' },
+  { key: 'confirmed', labelKey: 'order.status.confirmed', timestamp: 'confirmed_at' },
+  { key: 'delivered', labelKey: 'order.status.delivered', timestamp: 'delivered_at' },
 ];
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t, lang } = useLanguage();
-  const { order, items, loading, error, live, retry } = useOrder(id);
+  const { order, items, loading, error, retry } = useOrder(id);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -47,21 +46,37 @@ export default function OrderDetailPage() {
         ) : (
           <>
             {new URLSearchParams(window.location.search).get('confirmed') === '1' && order.status === 'pending' && (
-              <section className="card my-2 border-l-4 border-l-brand-success p-4" role="status">
-                <h2 className="flex items-center gap-2 font-bold text-brand-success"><CheckCircle2 size={20} aria-hidden="true" /> {t('confirm.title')}</h2>
+              <section className="card my-2 border-l-4 border-l-brand-primary p-4" role="status">
+                <h2 className="font-bold text-brand-text">{t('confirm.placedTitle')}</h2>
                 <p className="mt-1 text-sm text-brand-text">{t('confirm.ref')}: <b className="tabular-nums">{order.order_number}</b></p>
                 <p className="mt-1 text-sm text-brand-subtle">{t('confirm.nextPending')}</p>
                 <p className="mt-1 text-sm">{t('order.cashDue', { amount: formatRupee(rupeesToPaise(order.total)) })}</p>
                 {order.eta_minutes && <p className="mt-1 text-sm">{t('confirm.eta')}: ~{order.eta_minutes} {lang === 'kn' ? 'ನಿಮಿಷ' : 'min'}</p>}
               </section>
             )}
+            {customerVisibleOrderStatus(order.status) === 'confirmed' && (
+              <section className="my-2 rounded-2xl border border-brand-success/30 bg-brand-successBg p-4 sm:p-5" role="status">
+                <h2 className="flex items-center gap-2 text-base font-bold text-brand-success sm:text-lg">
+                  <CheckCircle2 size={22} className="shrink-0" aria-hidden="true" />
+                  <span>{customerOrderStatusLabel(order.status, t)}</span>
+                </h2>
+                <p className="mt-1 break-words text-sm text-brand-text">{t('order.customerConfirmed')}</p>
+                <DeliveryRideAnimation />
+                {order.eta_minutes != null && (
+                  <p className="animate-rise mt-2 flex items-center gap-1.5 text-sm font-semibold text-brand-success" aria-live="polite">
+                    <Clock size={15} aria-hidden="true" />
+                    {t('order.etaArrival', { minutes: String(order.eta_minutes) })}
+                  </p>
+                )}
+                <p className="mt-1 text-sm text-brand-subtle">{t('confirm.ref')}: <b className="tabular-nums">{order.order_number}</b></p>
+              </section>
+            )}
 
             <section className="card p-4" aria-label={t('status.badge')}>
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-bold">{t('status.badge')}</span>
-                <div className="flex items-center gap-2">
-                  {!live && <span className="text-[11px] font-medium text-brand-subtle" aria-live="polite">{t('orders.reconnecting')}</span>}
-                  <OrderStatusBadge status={order.status} />
+                <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                  <OrderStatusBadge status={customerVisibleOrderStatus(order.status)} label={customerOrderStatusLabel(order.status, t)} />
                 </div>
               </div>
               {order.status === 'rejected' && (
@@ -78,20 +93,21 @@ export default function OrderDetailPage() {
                 <p className="mt-2 text-sm text-brand-warn">{t('order.delayNote', { note: order.delay_note })}</p>
               )}
 
-              <TimelineStatusBar status={order.status} />
+              <TimelineStatusBar status={customerVisibleOrderStatus(order.status)} />
 
               <ol className="mt-2 grid" aria-label="Progress">
-                {TIMELINE.map((step) => {
-                  const stepIdx = TIMELINE.findIndex((s) => s.key === step.key);
-                  const currentIdx = order.status === 'rejected' ? -1 : TIMELINE.findIndex((s) => s.key === order.status);
-                  const done = order.status !== 'rejected' && stepIdx <= currentIdx;
-                  const current = stepIdx === currentIdx;
+                {TIMELINE.map((step, stepIdx) => {
+                  const displayStatus = customerVisibleOrderStatus(order.status);
+                  const currentIdx = TIMELINE.findIndex((s) => s.key === displayStatus);
+                  const completedAt = order[step.timestamp];
+                  const done = Boolean(completedAt);
+                  const current = step.key === displayStatus;
                   const isLast = stepIdx === TIMELINE.length - 1;
                   return (
                     <li key={step.key} className="relative flex items-start gap-2.5 pb-3 last:pb-0">
                       <span className="relative z-10 grid h-6 w-6 shrink-0 place-items-center bg-white">
                         {done ? (
-                          <CheckCircle2 size={18} aria-hidden="true" className={current ? 'text-brand-primary' : 'text-brand-success'} />
+                          <CheckCircle2 size={18} aria-hidden="true" className="text-brand-success" />
                         ) : (
                           <Circle size={18} aria-hidden="true" className="text-brand-border" />
                         )}
@@ -106,13 +122,31 @@ export default function OrderDetailPage() {
                         className={`pt-0.5 text-sm ${current ? 'font-bold text-brand-text' : done ? 'text-brand-text' : 'text-brand-subtle'}`}
                         aria-current={current ? 'step' : undefined}
                       >
-                        {t(step.labelKey)}
+                        <span>{customerOrderStatusLabel(step.key, t)}</span>
+                        {completedAt && (
+                          <time className="ml-2 text-xs font-normal text-brand-subtle" dateTime={completedAt}>
+                            {new Date(completedAt).toLocaleString(lang === 'kn' ? 'kn-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                          </time>
+                        )}
                       </span>
                     </li>
                   );
                 })}
-                {order.status === 'rejected' && (
-                  <li className="flex items-center gap-2 pt-2 text-sm text-brand-error"><XCircle size={16} aria-hidden="true" /> {t('order.status.rejected')}</li>
+                {(order.status === 'rejected' || order.status === 'cancelled') && (
+                  <li className="flex items-center gap-2 pt-2 text-sm text-brand-error">
+                    <XCircle size={16} aria-hidden="true" />
+                    <span>{t(`order.status.${order.status}`)}</span>
+                    {order.status === 'rejected' && order.rejected_at && (
+                      <time className="text-xs text-brand-subtle" dateTime={order.rejected_at}>
+                        {new Date(order.rejected_at).toLocaleString(lang === 'kn' ? 'kn-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                      </time>
+                    )}
+                    {order.status === 'cancelled' && order.cancelled_at && (
+                      <time className="text-xs text-brand-subtle" dateTime={order.cancelled_at}>
+                        {new Date(order.cancelled_at).toLocaleString(lang === 'kn' ? 'kn-IN' : 'en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                      </time>
+                    )}
+                  </li>
                 )}
               </ol>
             </section>
@@ -123,24 +157,33 @@ export default function OrderDetailPage() {
               </button>
             )}
 
-            {order.status === 'out_for_delivery' && (
-              <section className="card mt-3 p-4">
-                <p className="font-semibold">{t('order.pin')}</p>
-                <p className="mt-1 text-center text-2xl font-bold tracking-[0.4em] tabular-nums text-brand-primary" aria-label={`${t('order.pin')}: ${maskPin(order.delivery_pin ?? '')}`}>
-                  {maskPin(order.delivery_pin ?? '')}
-                </p>
-              </section>
-            )}
-
             <section className="card mt-3 p-4">
               <h2 className="mb-2 font-bold">{t('order.items')}</h2>
-              <ul className="grid gap-1 text-sm">
-                {items.map((it) => (
-                  <li key={it.id} className="flex justify-between gap-2">
-                    <span className="min-w-0 truncate">{lang === 'kn' ? it.name_kn || it.name_en : it.name_en} × {it.quantity}</span>
-                    <span className="whitespace-nowrap">{formatRupee(rupeesToPaise(it.item_total))}</span>
-                  </li>
-                ))}
+              <ul className="grid gap-2" aria-label={t('order.items')}>
+                {items.map((it) => {
+                  const name = lang === 'kn' ? it.name_kn || it.name_en : it.name_en;
+                  const description = lang === 'kn' ? it.menu_items?.description_kn ?? it.menu_items?.description_en : it.menu_items?.description_en;
+                  const image = publicImageUrl(it.menu_items?.image_path ?? null);
+                  return (
+                    <li key={it.id} className="flex items-center gap-3 rounded-xl border border-brand-border bg-white p-2.5">
+                      {image ? (
+                        <img src={image} alt={name} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                      ) : (
+                        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-brand-bg text-brand-subtle"><Utensils size={20} aria-hidden="true" /></span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="flex min-w-0 items-center gap-1.5 font-semibold">
+                          {it.menu_items && <span className={`h-2 w-2 shrink-0 rounded-full border ${it.menu_items.is_vegetarian ? 'border-green-600 bg-green-500' : 'border-red-700 bg-red-600'}`} aria-label={t(it.menu_items.is_vegetarian ? 'menu.veg' : 'menu.nonVeg')} title={t(it.menu_items.is_vegetarian ? 'menu.veg' : 'menu.nonVeg')} />}
+                          <span className="min-w-0 truncate">{name}</span>
+                          <span className="ml-auto shrink-0 rounded-full bg-brand-bg px-2 py-0.5 text-xs font-bold tabular-nums">× {it.quantity}</span>
+                        </p>
+                        {description && <p className="mt-0.5 line-clamp-2 text-xs text-brand-subtle">{description}</p>}
+                        <p className="mt-1 text-xs tabular-nums text-brand-subtle"><span>{t('order.eachLine', { price: formatRupee(rupeesToPaise(it.unit_price)) })}</span>{rupeesToPaise(it.discount_amount) > 0 && <span className="ml-1 text-brand-success">−{formatRupee(rupeesToPaise(it.discount_amount))}</span>}</p>
+                      </div>
+                      <span className="shrink-0 font-bold tabular-nums">{formatRupee(rupeesToPaise(it.item_total))}</span>
+                    </li>
+                  );
+                })}
               </ul>
               <dl className="mt-2 grid gap-1 border-t border-brand-border pt-2 text-sm">
                 <div className="flex justify-between"><dt>{t('cart.itemTotal')}</dt><dd>{formatRupee(rupeesToPaise(order.subtotal))}</dd></div>
@@ -207,14 +250,9 @@ export default function OrderDetailPage() {
   }
 }
 
-function maskPin(pin: string): string {
-  return pin ? pin.replace(/\d(?=((\d{3})+$))/g, '•') || pin : '—';
-}
-
-/** Thin fill bar under the header of the status card: how far along the
- * delivery steps this order is (rejected collapses it to an error hue). */
+/** Thin fill bar under the header: pending → confirmed → delivered. */
 function TimelineStatusBar({ status }: { status: OrderStatus }) {
-  const currentIdx = status === 'rejected' ? -1 : TIMELINE.findIndex((s) => s.key === status);
+  const currentIdx = status === 'rejected' || status === 'cancelled' ? -1 : TIMELINE.findIndex((s) => s.key === status);
   if (currentIdx === -1) {
     return <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-brand-errorBg"><div className="h-full w-full bg-brand-error/70" /></div>;
   }
@@ -222,7 +260,7 @@ function TimelineStatusBar({ status }: { status: OrderStatus }) {
   return (
     <div className="mt-3 flex items-center gap-2" aria-hidden="true">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-brand-border/70">
-        <div className="h-full rounded-full bg-brand-primary transition-all duration-500" style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-brand-success transition-all duration-500" style={{ width: `${percent}%` }} />
       </div>
       <span className="text-[11px] font-semibold tabular-nums text-brand-subtle">{percent}%</span>
     </div>

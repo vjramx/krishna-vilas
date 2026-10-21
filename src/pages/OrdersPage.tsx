@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, OrderStatusBadge, Spinner } from '@/components/
 import { formatRupee, rupeesToPaise } from '@/lib/money';
 import { ChevronRight, ClipboardList, MapPin } from 'lucide-react';
 import type { OrderStatus } from '@/types/db';
+import { customerOrderStatusLabel, customerVisibleOrderStatus } from '@/lib/orderPresentation';
 
 const ACTIVE_STATUSES: OrderStatus[] = ['pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery'];
 type Filter = 'active' | 'completed' | 'all';
@@ -55,10 +56,12 @@ export default function OrdersPage() {
             <Chip selected={filter === 'active'} onClick={() => setFilter('active')} label={t('orders.filterActive')} count={orders.orders.filter((o) => ACTIVE_STATUSES.includes(o.status)).length} />
             <Chip selected={filter === 'completed'} onClick={() => setFilter('completed')} label={t('orders.filterCompleted')} count={orders.orders.filter((o) => !ACTIVE_STATUSES.includes(o.status)).length} />
             <Chip selected={filter === 'all'} onClick={() => setFilter('all')} label={t('orders.filterAll')} />
-            <span className="ml-auto flex items-center gap-1.5 text-[11px] font-medium text-brand-subtle" aria-live="polite">
-              <span aria-hidden="true" className={`h-2 w-2 rounded-full ${orders.live ? 'bg-brand-success' : 'bg-brand-warn'}`} />
-              {orders.live ? t('orders.live') : t('orders.reconnecting')}
-            </span>
+            {orders.live && (
+              <span className="ml-auto flex items-center gap-1.5 text-[11px] font-medium text-brand-subtle" aria-live="polite">
+                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand-success" />
+                {t('orders.live')}
+              </span>
+            )}
           </div>
         )}
         {orders.fromCache && <p className="mb-2 text-center text-xs text-brand-subtle">{t('common.offline')}</p>}
@@ -83,7 +86,7 @@ export default function OrdersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[15px] font-bold tabular-nums">{o.order_number}</span>
-                      <OrderStatusBadge status={o.status} />
+                      <OrderStatusBadge status={customerVisibleOrderStatus(o.status)} label={customerOrderStatusLabel(o.status, t)} />
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[13px] text-brand-subtle">
                       <span className="min-w-0 truncate">{t('orders.payment')} · {formatRupee(rupeesToPaise(o.total))}</span>

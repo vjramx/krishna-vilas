@@ -100,10 +100,26 @@ describe('Admin menu loading', () => {
     expect(screen.getByRole('status')).toHaveTextContent('admin.itemSaved');
   });
 
+  it('eye button persists and announces customer visibility changes', async () => {
+    h.updateSelect.mockImplementation(() => Promise.resolve({ data: [{ id: 'idli', is_active: h.updateSelect.mock.calls.length % 2 === 1 }], error: null }));
+    mount();
+    const eye = await screen.findByRole('switch', { name: 'Idli: admin.hideFromMenu' });
+    expect(eye).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(eye);
+    await waitFor(() => expect(h.updateSelect).toHaveBeenCalled());
+    expect(screen.getByRole('status')).toHaveTextContent('admin.itemHidden');
+    const hiddenEye = screen.getByRole('switch', { name: 'Idli: admin.showInMenu' });
+    expect(hiddenEye).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(hiddenEye);
+    await waitFor(() => expect(h.updateSelect).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('status')).toHaveTextContent('admin.itemShown');
+    expect(screen.getByRole('switch', { name: 'Idli: admin.hideFromMenu' })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('does not pretend an availability change succeeded when the server rejects it', async () => {
     h.update.mockResolvedValue({ error: { message: 'NOT_ADMINISTRATOR' } });
     mount();
-    const toggle = await screen.findByRole('switch');
+    const toggle = await screen.findByRole('switch', { name: 'Idli: admin.available' });
     fireEvent.click(toggle);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(toggle).toHaveAttribute('aria-checked', 'true');

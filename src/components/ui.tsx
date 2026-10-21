@@ -48,13 +48,13 @@ const STATUS_STYLE: Record<OrderStatus, { bg: string; fg: string; icon: ReactNod
   cancelled: { bg: 'bg-brand-bg', fg: 'text-brand-subtle', icon: <Ban size={14} aria-hidden="true" /> },
 };
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({ status, label }: { status: OrderStatus; label?: string }) {
   const { t } = useLanguage();
   const style = STATUS_STYLE[status];
   return (
     <span className={`badge ${style.bg} ${style.fg}`}>
       {style.icon}
-      {t(`order.status.${status}`)}
+      {label ?? t(`order.status.${status}`)}
     </span>
   );
 }
@@ -147,6 +147,8 @@ export function Sheet({
   children,
   desktopDialog = false,
   headerIcon,
+  fullScreen = false,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -154,6 +156,15 @@ export function Sheet({
   children: ReactNode;
   desktopDialog?: boolean;
   headerIcon?: ReactNode;
+  /** Item detail: a full-screen view filling the band below the sticky app
+   * bar — the header itself stays visible and unobstructed while it is open.
+   * Children manage their own scroll/padding (image area + details + pinned
+   * action footer). */
+  fullScreen?: boolean;
+  /** fullScreen only: genuine wide surface → edge-to-edge two-column
+   * presentation. Decided in JS from the true device width so WebViews that
+   * mis-report the layout viewport still get the stacked phone layout. */
+  wide?: boolean;
 }) {
   const { t } = useLanguage();
   const ref = useRef<HTMLDivElement>(null);
@@ -202,7 +213,14 @@ export function Sheet({
 
   if (!open) return null;
   return (
-    <div className={`fixed inset-0 z-50 flex flex-col justify-end ${desktopDialog ? 'lg:justify-center lg:px-6 lg:py-6' : ''}`}>
+    <div
+      className={
+        fullScreen
+          ? 'fixed inset-x-0 bottom-0 z-50 flex flex-col'
+          : `fixed inset-0 z-50 flex flex-col justify-end ${desktopDialog ? 'lg:justify-center lg:px-6 lg:py-6' : ''}`
+      }
+      style={fullScreen ? { top: 'var(--app-header, 56px)' } : undefined}
+    >
       <div className="absolute inset-0 bg-brand-scrim fade-in" onClick={close} aria-hidden="true" />
       <div
         ref={ref}
@@ -210,25 +228,48 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`sheet-up relative mx-auto flex max-h-[92dvh] w-full max-w-app flex-col rounded-t-3xl bg-white shadow-sheet outline-none ${desktopDialog ? 'lg:max-h-[calc(100dvh-3rem)] lg:max-w-5xl lg:rounded-3xl' : ''}`}
+        className={`sheet-up relative mx-auto flex w-full max-w-app flex-col bg-white shadow-sheet outline-none ${
+          fullScreen
+            ? wide
+              ? 'h-full max-w-none overflow-hidden rounded-none shadow-none'
+              : 'max-h-full overflow-hidden rounded-t-3xl'
+            : `max-h-[92dvh] rounded-t-3xl ${desktopDialog ? 'lg:max-h-[calc(100dvh-3rem)] lg:max-w-5xl lg:rounded-3xl' : ''}`
+        }`}
         style={{ paddingBottom: 'var(--safe-bottom)' }}
       >
-        <div className="grid shrink-0 place-items-center pb-1 pt-2.5">
-          <span className="h-1.5 w-10 rounded-full bg-brand-border" aria-hidden="true" />
-        </div>
-        <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
-          {headerIcon}
-          <h2 id={titleId} className="min-w-0 flex-1 truncate text-lg font-bold">{title}</h2>
-          <button
-            type="button"
-            className="tap grid h-10 w-10 place-items-center rounded-full text-brand-subtle active:bg-brand-bg"
-            aria-label={t('common.close')}
-            onClick={close}
-          >
-            <X size={21} aria-hidden="true" />
-          </button>
-        </div>
-        <div className="app-scroll min-h-0 flex-1 px-4 pb-5">{children}</div>
+        {fullScreen ? (
+          <>
+            <h2 id={titleId} className="sr-only">{title}</h2>
+            <button
+              type="button"
+              className="tap absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-brand-text shadow-elev1 backdrop-blur active:bg-white"
+              aria-label={t('common.close')}
+              onClick={close}
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
+            <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+          </>
+        ) : (
+          <>
+            <div className="grid shrink-0 place-items-center pb-1 pt-2.5">
+              <span className="h-1.5 w-10 rounded-full bg-brand-border" aria-hidden="true" />
+            </div>
+            <div className="flex shrink-0 items-center gap-2 px-4 pb-2">
+              {headerIcon}
+              <h2 id={titleId} className="min-w-0 flex-1 truncate text-lg font-bold">{title}</h2>
+              <button
+                type="button"
+                className="tap grid h-10 w-10 place-items-center rounded-full text-brand-subtle active:bg-brand-bg"
+                aria-label={t('common.close')}
+                onClick={close}
+              >
+                <X size={21} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="app-scroll min-h-0 flex-1 px-4 pb-5">{children}</div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -43,6 +43,13 @@ const RPC_CODE_MAP: Record<string, string> = {
   REASON_REQUIRED: 'err.reasonRequired',
   NOT_ORDER_OWNER: 'err.forbidden',
   CANCEL_TOO_LATE: 'err.cancelTooLate',
+  COORDINATES_INCOMPLETE: 'err.locationIncomplete',
+  LATITUDE_INVALID: 'err.locationInvalid',
+  LONGITUDE_INVALID: 'err.locationInvalid',
+  LOCATION_ACCURACY_INVALID: 'err.locationInvalid',
+  LOCATION_SOURCE_INVALID: 'err.locationInvalid',
+  LOCATION_CONFIRMATION_INVALID: 'err.locationInvalid',
+  DELIVERY_DETAILS_INVALID: 'err.deliveryDetailsInvalid',
 };
 
 export function isMissingRpcFunction(error: unknown, functionName: string): boolean {
@@ -53,6 +60,8 @@ export function isMissingRpcFunction(error: unknown, functionName: string): bool
     value.code === 'PGRST202' || /schema cache|could not find the function|no matches were found/i.test(message)
   );
 }
+
+export const KNOWN_KV_CODES: string[] = Object.keys(RPC_CODE_MAP);
 
 export function parseKvError(rawUnknown: unknown): KvError {
   let initial = '';

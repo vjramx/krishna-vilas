@@ -152,5 +152,11 @@ begin
 end
 $function$;
 
-revoke all on function public.place_order_with_location(jsonb, text, text, text, text, text, text, uuid, numeric, numeric, numeric, text, timestamptz, jsonb) from public, anon;
-grant execute on function public.place_order_with_location(jsonb, text, text, text, text, text, text, uuid, numeric, numeric, numeric, text, timestamptz, jsonb) to authenticated;
+revoke all on function public.place_order_with_location(jsonb, text, text, text, text, text, text, uuid, numeric, numeric, numeric, text, timestamptz, jsonb) from public;
+-- NOTE: execute must include the `anon` Postgres role. Customers sign in with
+-- Firebase (third-party auth) and their ID tokens carry no `role` claim, so
+-- every Data API call — signed in or not — runs as `anon`. The in-function
+-- AUTH_REQUIRED check (via place_order -> kv_subject) is the real gate, so
+-- granting execute to anon is safe; granting only to `authenticated` makes the
+-- function invisible to all customers and yields HTTP 401 at place-order time.
+grant execute on function public.place_order_with_location(jsonb, text, text, text, text, text, text, uuid, numeric, numeric, numeric, text, timestamptz, jsonb) to anon, authenticated;

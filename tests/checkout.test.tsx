@@ -1,22 +1,45 @@
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  auth: { session: null as object | null, userId: null, loading: false },
+  auth: { session: null as object | null, userId: null as string | null, loading: false },
   settings: { data: null as Record<string, unknown> | null, loading: false, retry: vi.fn() },
+  cart: {
+    lines: [] as { itemId: string; nameEn: string; nameKn: string; unitPaise: number; quantity: number }[],
+    unavailableIds: [] as string[],
+    clear: vi.fn(),
+    remove: vi.fn(),
+    syncPrices: vi.fn(),
+    markUnavailable: vi.fn(),
+  },
+  catalogRows: [] as { id: string; category_id: string; price: number; name_en: string; name_kn: string; is_active: boolean; is_available: boolean }[],
+  offers: [] as { discount_type: 'percent' | 'flat'; discount_value: number; scope: 'item' | 'category' | 'all'; target_id: string | null }[],
   rpc: vi.fn(),
 }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => h.auth }));
 vi.mock('@/hooks/useHotelSettings', () => ({ useHotelSettings: () => h.settings }));
-vi.mock('@/context/LanguageContext', () => ({ useLanguage: () => ({ t: (key: string) => key, lang: 'en' }) }));
-vi.mock('@/context/CartContext', () => ({ useCart: () => ({
-  lines: [{ itemId: 'idli', nameEn: 'Idli', nameKn: '', unitPaise: 10000, quantity: 1 }],
-  clear: vi.fn(),
-}) }));
+vi.mock('@/context/LanguageContext', () => ({ useLanguage: () => ({ t: (key: string, values?: Record<string, string>) => values ? `${key} ${JSON.stringify(values)}` : key, lang: 'en' }) }));
+vi.mock('@/context/CartContext', () => ({ useCart: () => h.cart }));
 vi.mock('@/components/nav', () => ({ TopBackBar: () => <header /> }));
-vi.mock('@/components/DeliveryMap', () => ({ DeliveryMap: () => <div data-testid="delivery-map" /> }));
-vi.mock('@/lib/supabase', () => ({ supabase: { rpc: h.rpc } }));
+vi.mock('@/lib/supabase', () => ({    supabase: {
+      rpc: h.rpc,
+      from: vi.fn((table: string) => {
+
+      const query = {
+        select: () => query,
+        in: () => query,
+        eq: () => query,
+        lte: () => query,
+        gte: () => query,
+        abortSignal: () => query,
+        then: (resolve: (result: { data: unknown[]; error: null }) => unknown) =>
+          Promise.resolve({ data: table === 'special_offers' ? h.offers : h.catalogRows, error: null }).then(resolve),
+      };
+      return query;
+    }),
+  },
+}));
 import CheckoutPage from '@/pages/CheckoutPage';
 
 function mount() {
@@ -27,9 +50,60 @@ beforeEach(() => {
   sessionStorage.clear();
   h.auth = { session: null, userId: null, loading: false };
   h.rpc.mockReset();
+  h.cart = {
+    lines: [{ itemId: 'idli', nameEn: 'Idli', nameKn: '', unitPaise: 10000, quantity: 1 }],
+    unavailableIds: [], clear: vi.fn(), remove: vi.fn(), syncPrices: vi.fn(), markUnavailable: vi.fn(),
+  };
+  h.catalogRows = [{ id: 'idli', category_id: 'breakfast', price: 100, name_en: 'Idli', name_kn: '', is_active: true, is_available: true }];
+  h.offers = [];
   h.settings = { data: { is_accepting_orders: true, delivery_fee: 10, min_order_total: 50, opens_at: '08:00', closes_at: '22:00' }, loading: false, retry: vi.fn() };
 });
+afterEach(() => {
+  cleanup();
+});
 describe('Checkout recovery', () => {
+  it('compares minimum food subtotal, not the delivery-inclusive total, with the server rule', async () => {
+    h.auth.session = {};
+    h.cart.lines = [{ itemId: 'upma', nameEn: 'Upma', nameKn: '', unitPaise: 4000, quantity: 1 }];
+    h.catalogRows = [{ id: 'upma', category_id: 'breakfast', price: 40, name_en: 'Upma', name_kn: '', is_active: true, is_available: true }];
+    mount();
+    expect(screen.getAllByText('common.total')[0]?.parentElement).toHaveTextContent('₹50');
+    expect(screen.getAllByText(/checkout\.minFoodSubtotal/)[0]).toHaveTextContent('"more":"10"');
+    expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeDisabled();
+
+    h.cart.lines = [{ itemId: 'upma', nameEn: 'Upma', nameKn: '', unitPaise: 5000, quantity: 1 }];
+    h.catalogRows = [{ id: 'upma', category_id: 'breakfast', price: 50, name_en: 'Upma', name_kn: '', is_active: true, is_available: true }];
+    cleanup();
+    mount();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeEnabled());
+    expect(screen.getAllByText('common.total')[0]?.parentElement).toHaveTextContent('₹60');
+    expect(screen.queryByText(/checkout\.minFoodSubtotal/)).toBeNull();
+  });
+
+  it('refreshes a saved cart price from the live catalog before enabling checkout', async () => {
+    h.auth.session = {};
+    h.cart.lines = [{ itemId: 'upma', nameEn: 'Upma', nameKn: '', unitPaise: 4000, quantity: 1 }];
+    h.catalogRows = [{ id: 'upma', category_id: 'breakfast', price: 40, name_en: 'Upma', name_kn: '', is_active: true, is_available: true }];
+    h.cart.syncPrices.mockImplementation((items: typeof h.catalogRows) => {
+      h.cart.lines = h.cart.lines.map((line) => {
+        const fresh = items.find((item) => item.id === line.itemId);
+        return fresh ? { ...line, unitPaise: Math.round(fresh.price * 100), nameEn: fresh.name_en, nameKn: fresh.name_kn } : line;
+      });
+    });
+    mount();
+    await vi.waitFor(() => expect(h.cart.syncPrices).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeDisabled();
+    expect(screen.getAllByText('common.total')[0]?.parentElement).toHaveTextContent('₹50');
+  });
+
+  it('enables checkout above the configured food subtotal minimum', async () => {
+    h.auth.session = {};
+    h.cart.lines = [{ itemId: 'upma', nameEn: 'Upma', nameKn: '', unitPaise: 5100, quantity: 1 }];
+    h.catalogRows = [{ id: 'upma', category_id: 'breakfast', price: 51, name_en: 'Upma', name_kn: '', is_active: true, is_available: true }];
+    mount();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeEnabled());
+  });
+
   it('offers sign-in with a checkout return instead of a place-order button to guests', () => {
     mount();
     expect(screen.queryByRole('button', { name: 'checkout.placeOrder' })).toBeNull();
@@ -37,14 +111,15 @@ describe('Checkout recovery', () => {
       expect(link).toHaveAttribute('href', '/login?next=%2Fcheckout');
     }
   });
-  it('keeps the form and save preference across unmount/reload without permanent storage', () => {
+  it('keeps the form and explicit save preference across reload without opting in by default', () => {
     mount();
     fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
     fireEvent.click(screen.getByRole('checkbox'));
     cleanup();
     mount();
     expect(screen.getByLabelText('checkout.name')).toHaveValue('Priya');
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.getByRole('checkbox')).toBeChecked();
     expect(localStorage.getItem('kv-delivery-details')).toBeNull();
   });
   it('disables submission while settings are loading, without claiming the kitchen is closed', () => {
@@ -55,73 +130,96 @@ describe('Checkout recovery', () => {
     expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeDisabled();
     expect(screen.queryByText('checkout.notAccepting')).toBeNull();
   });
-  it('renders one compact optional location picker after the manual address fields', () => {
-    mount();
-    const picker = document.querySelector('[data-location-picker]');
-    expect(picker).toBeInTheDocument();
-    expect(picker?.querySelectorAll('button')).toHaveLength(2);
-    expect(picker?.textContent).toContain('checkout.locationPrivacy');
-    expect(document.querySelectorAll('#ck-address')).toHaveLength(1);
-    const formItems = [...document.querySelectorAll('#checkout-form [data-location-picker], #checkout-form #ck-instr')];
-    expect(formItems.map((element) => element.id || 'location')).toEqual(['location', 'ck-instr']);
-  });
-  it('requests current location only after the customer taps the location action', async () => {
+  it('serves a plain address checkout — no location picker, no device geolocation, no map pin', () => {
     h.auth.session = {};
-    const denied = { code: 1, message: 'denied', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError;
-    const getCurrentPosition = vi.fn((...args: Parameters<Geolocation['getCurrentPosition']>) => args[1]?.(denied));
+    const getCurrentPosition = vi.fn(() => { throw new Error('geolocation must never be used'); });
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: { getCurrentPosition } });
-    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     mount();
+    expect(document.querySelector('[data-location-picker]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'checkout.chooseMap' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'checkout.useCurrentLocation' })).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(getCurrentPosition).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'checkout.useCurrentLocation' }));
-    await screen.findByText('checkout.locationDenied');
-    expect(getCurrentPosition).toHaveBeenCalledOnce();
-    expect(getCurrentPosition.mock.calls[0]?.[2]).toEqual({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   });
-  it('opens the map with a draft and leaves selection unchanged when cancelled', async () => {
+
+  it('places a COD order with the typed address and null coordinates, then clears the cart', async () => {
     h.auth.session = {};
-    sessionStorage.setItem('kv-checkout-location', JSON.stringify({
-      location: { latitude: 12.9, longitude: 77.5, accuracyMeters: null, source: 'map_pin', confirmedAt: '2025-01-01T00:00:00.000Z' },
-      confirmed: true,
-    }));
-    mount();
-    fireEvent.click(screen.getByRole('button', { name: 'checkout.chooseMap' }));
-    expect(await screen.findByRole('button', { name: 'checkout.confirmPin' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
-    expect(screen.getByText('checkout.locationSelected')).toBeInTheDocument();
-    expect(sessionStorage.getItem('kv-checkout-location')).toContain('12.9');
-  });
-  it('confirms GPS pin before submitting and persists exact coordinates with the order', async () => {
-    h.auth.session = {};
+    h.auth.userId = 'customer-1';
     h.rpc.mockResolvedValue({ data: { order_id: 'saved-order' }, error: null });
-    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
-    const position = { coords: { latitude: 12.9716, longitude: 77.5946, accuracy: 15 } } as GeolocationPosition;
-    const getCurrentPosition = vi.fn((...args: Parameters<Geolocation['getCurrentPosition']>) => args[0](position));
-    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: { getCurrentPosition } });
+    mount();
+    fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
+    fireEvent.change(screen.getByLabelText('checkout.phone'), { target: { value: '9876543210' } });
+    fireEvent.change(screen.getByLabelText('checkout.address'), { target: { value: '12 Main Street' } });
+    fireEvent.change(screen.getByLabelText('checkout.area'), { target: { value: 'Karatagi' } });
+    const submit = screen.getByRole('button', { name: 'checkout.placeOrder' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await vi.waitFor(() => expect(h.rpc).toHaveBeenCalledOnce());
+    expect(h.rpc.mock.calls[0]?.[0]).toBe('place_order_with_location');
+    expect(h.rpc.mock.calls[0]?.[1]).toMatchObject({
+      p_customer_name: 'Priya',
+      p_phone: '9876543210',
+      p_address_line: '12 Main Street',
+      p_area: 'Karatagi',
+      // Address-only checkout: the backend receives no pin at all.
+      p_delivery_latitude: null,
+      p_delivery_longitude: null,
+      p_location_accuracy_meters: null,
+      p_location_source: 'manual_address',
+      p_location_confirmed_at: null,
+      p_delivery_details: {},
+    });
+    await vi.waitFor(() => expect(h.cart.clear).toHaveBeenCalledOnce());
+  });
+
+  it('allows placing an order as soon as the address block is valid without any pin', async () => {
+    h.auth.session = {};
+    mount();
+    fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
+    fireEvent.change(screen.getByLabelText('checkout.phone'), { target: { value: '9876543210' } });
+    fireEvent.change(screen.getByLabelText('checkout.address'), { target: { value: '12 Main Street' } });
+    fireEvent.change(screen.getByLabelText('checkout.area'), { target: { value: 'Karatagi' } });
+    const submit = screen.getByRole('button', { name: 'checkout.placeOrder' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(screen.queryByText('checkout.pinRequired')).toBeNull();
+  });
+
+  it('recovers from a thrown order RPC, preserves the cart and prevents duplicate taps', async () => {
+    h.auth.session = {};
+    h.rpc.mockImplementationOnce(() => new Promise((_resolve, reject) => setTimeout(() => reject(new TypeError('Failed to fetch')), 20)));
     mount();
     fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
     fireEvent.change(screen.getByLabelText('checkout.phone'), { target: { value: '9876543210' } });
     fireEvent.change(screen.getByLabelText('checkout.address'), { target: { value: '12 Main Street' } });
     fireEvent.change(screen.getByLabelText('checkout.area'), { target: { value: 'Mysuru' } });
-    fireEvent.click(screen.getByRole('button', { name: 'checkout.useCurrentLocation' }));
-    await screen.findByRole('button', { name: 'checkout.confirmPin' });
-    fireEvent.click(screen.getByRole('button', { name: 'checkout.confirmPin' }));
-    expect(await screen.findByText('checkout.locationSelected')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'checkout.placeOrder' }));
-    await vi.waitFor(() => expect(h.rpc).toHaveBeenCalledOnce());
-    const payload = h.rpc.mock.calls[0]?.[1];
-    expect(h.rpc.mock.calls[0]?.[0]).toBe('place_order_with_location');
-    expect(payload).toMatchObject({
-      p_delivery_latitude: 12.9716,
-      p_delivery_longitude: 77.5946,
-      p_address_line: '12 Main Street',
-      p_location_accuracy_meters: 15,
-      p_location_source: 'browser_geolocation',
-      p_delivery_details: {},
-    });
-    expect(payload.p_location_confirmed_at).toEqual(expect.any(String));
+    const button = screen.getByRole('button', { name: 'checkout.placeOrder' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    fireEvent.submit(document.getElementById('checkout-form')!);
+    expect(h.rpc).toHaveBeenCalledOnce();
+    expect(button).toBeDisabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent('err.network');
+    expect(button).toBeEnabled();
+    expect(h.cart.clear).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('kv-order-pending')).toMatch(/^[\da-f-]{36}$/i);
   });
+
+  it('does not clear the cart or navigate when the backend response has no order id', async () => {
+    h.auth.session = {};
+    h.rpc.mockResolvedValue({ data: null, error: null });
+    mount();
+    fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
+    fireEvent.change(screen.getByLabelText('checkout.phone'), { target: { value: '9876543210' } });
+    fireEvent.change(screen.getByLabelText('checkout.address'), { target: { value: '12 Main Street' } });
+    fireEvent.change(screen.getByLabelText('checkout.area'), { target: { value: 'Mysuru' } });
+    const button = screen.getByRole('button', { name: 'checkout.placeOrder' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(await screen.findByRole('alert')).toHaveTextContent('err.generic');
+    expect(h.cart.clear).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('kv-order-pending')).toBeTruthy();
+  });
+
   it('offers Retry for missing settings and keeps order submission disabled', () => {
     h.auth.session = {};
     h.settings.data = null;

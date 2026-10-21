@@ -185,11 +185,12 @@ describe('Role-resolution failure states (backend refused the session)', () => {
     });
     render(PageRoutes('/'));
     expect(screen.getByTestId('account-role-failed')).toHaveTextContent('login.roleCheckFailed');
-    // Raw internals never appear inside the friendly block — the [dbg] dev line
-    // is a separate element and is fine to carry detail in dev builds.
+    // Raw internals never appear inside the friendly block.
     expect(
       within(screen.getByTestId('account-role-failed')).queryByText(/No suitable key/),
     ).toBeNull();
+    // No [dbg] diagnostics leak in any build — internal codes stay internal.
+    expect(document.body.textContent).not.toMatch(/\[dbg\]/);
   });
 
   it('LoginPage with a failed role check falls through to the Account route', async () => {

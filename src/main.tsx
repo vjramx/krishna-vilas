@@ -15,14 +15,6 @@ const nativeShell =
   /^(file|capacitor|ionic|app):$/.test(window.location.protocol);
 const Router = nativeShell ? HashRouter : BrowserRouter;
 
-/** Hand off from the launch splash once the first screen is actually mounted. */
-function hideSplash() {
-  const splash = document.getElementById('boot-splash');
-  if (!splash) return;
-  splash.setAttribute('data-hide', 'true');
-  window.setTimeout(() => splash.remove(), 260);
-}
-
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthProvider>
@@ -32,6 +24,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </AuthProvider>
   </React.StrictMode>,
 );
-
-// Two frames: React has committed and the browser has painted the first screen.
-requestAnimationFrame(() => requestAnimationFrame(hideSplash));

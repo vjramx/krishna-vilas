@@ -7,6 +7,7 @@ import { showSnackbar } from '@/components/ui';
 import { haptic } from '@/lib/haptics';
 import { readCache } from '@/hooks/useOrders';
 import type { Order } from '@/types/db';
+import { customerOrderStatusLabel, customerVisibleOrderStatus } from '@/lib/orderPresentation';
 
 const OPT_OUT_KEY = 'kv-notify-orders';
 
@@ -54,18 +55,19 @@ export default function OrderNotifier() {
     // announce orders that changed before the app opened.
     const map = lastStatusRef.current;
     map.clear();
-    for (const o of readCache(userId)) map.set(o.id, o.status);
+    for (const o of readCache(userId)) map.set(o.id, customerVisibleOrderStatus(o.status));
 
     const channel = supabase
       .channel(`orders-notify-${userId.slice(0, 8)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
         const next = payload.new as Order | null;
         if (!next || next.customer_id !== userId) return;
+        const visibleStatus = customerVisibleOrderStatus(next.status);
         const prev = map.get(next.id);
-        map.set(next.id, next.status);
-        if (prev === undefined || prev === next.status) return;
+        map.set(next.id, visibleStatus);
+        if (prev === undefined || prev === visibleStatus) return;
 
-        const title = `${next.order_number} · ${t(`order.status.${next.status}`)}`;
+        const title = `${next.order_number} · ${customerOrderStatusLabel(visibleStatus, t)}`;
         haptic(24);
         showSnackbar(title, {
           label: t('common.view'),

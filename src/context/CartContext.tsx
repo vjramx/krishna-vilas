@@ -20,7 +20,7 @@ interface CartValue {
   remove: (itemId: string) => void;
   clear: () => void;
   quantityOf: (itemId: string) => number;
-  syncPrices: (items: MenuItem[]) => void;
+  syncPrices: (items: Pick<MenuItem, 'id' | 'price' | 'name_en' | 'name_kn'>[]) => void;
   unavailableIds: string[];
   markUnavailable: (ids: string[]) => void;
 }
@@ -106,7 +106,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   /** Reconcile trusted backend prices/names into cart lines (no network per tap). */
-  const syncPrices = useCallback((items: MenuItem[]) => {
+  const syncPrices = useCallback((items: Pick<MenuItem, 'id' | 'price' | 'name_en' | 'name_kn'>[]) => {
     setLines((prev) =>
       prev.map((l) => {
         const m = items.find((i) => i.id === l.itemId);

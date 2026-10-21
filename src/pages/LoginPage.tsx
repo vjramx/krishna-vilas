@@ -149,20 +149,6 @@ export default function LoginPage() {
             {t('nav.backHome')}
           </Link>
 
-          {/* Dev-only diagnostic: makes the backend-resolved role and any role
-              RPC failure visible instead of silently dropping to customer. */}
-          {import.meta.env.DEV && session && (
-            <p
-              data-testid="auth-role-diagnostic"
-              className={`text-center text-[11px] leading-relaxed ${
-                roleError ? 'font-semibold text-brand-error' : 'text-brand-subtle'
-              }`}
-            >
-              {roleError
-                ? `[dbg] role error: ${roleError}`
-                : `[dbg] signed in: ${email ?? '—'} · role=${role}`}
-            </p>
-          )}
         </div>
       </main>
     </div>

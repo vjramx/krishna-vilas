@@ -89,6 +89,12 @@ export interface Order {
   eta_minutes: number | null;
   delay_note: string | null;
   reject_reason: string | null;
+  confirmed_at: string | null;
+  preparing_at: string | null;
+  ready_at: string | null;
+  out_for_delivery_at: string | null;
+  delivered_at: string | null;
+  rejected_at: string | null;
   cancelled_at: string | null;
   cancelled_by: 'customer' | 'restaurant' | null;
   delivery_latitude: number | string | null;
@@ -102,6 +108,14 @@ export interface Order {
   delivery_city: string | null;
   delivery_pincode: string | null;
   delivery_floor: string | null;
+  agent_latitude: number | string | null;
+  agent_longitude: number | string | null;
+  agent_location_accuracy_meters: number | string | null;
+  agent_location_at: string | null;
+  accepted_at: string | null;
+  arrived_at: string | null;
+  picked_up_at: string | null;
+  customer_reached_at: string | null;
   created_at: string;
   agent_id: string | null;
   assignment_status: AssignmentStatus;
@@ -124,6 +138,13 @@ export interface OrderItem {
   discount_amount: string;
   item_total: string;
 }
+
+/** An ordered line with its menu-item snapshot hydrated client-side (null
+ * when the item has no snapshot or was deleted from the catalog). */
+export type OrderItemWithSnapshot = OrderItem & {
+  /** Hydrated from menu_items by menu_item_id; includes id (also used to group repeated rows). */
+  menu_items: Pick<MenuItem, 'id' | 'image_path' | 'description_en' | 'description_kn' | 'is_vegetarian'> | null;
+};
 
 export interface AdminUser {
   id: string;

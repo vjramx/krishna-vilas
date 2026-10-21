@@ -174,6 +174,26 @@ a[role='button'],
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  /* Gentle card entrance: content slides up a few px and fades in.
+     Respects the OS reduced-motion preference. */
+  @media (prefers-reduced-motion: no-preference) {
+    .animate-rise {
+      animation: kv-rise 240ms ease-out both;
+    }
+    @keyframes kv-rise {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: none;
+      }
+    }
+    button:active {
+      transform: scale(0.985);
+    }
+  }
   .pt-safe {
     padding-top: var(--safe-top);
   }
