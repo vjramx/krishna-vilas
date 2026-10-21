@@ -6,6 +6,7 @@ import { publicImageUrl } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
 import { useHotelSettings } from '@/hooks/useHotelSettings';
 import { useAuth } from '@/context/AuthContext';
+import { ChevronRight } from 'lucide-react';
 import { TopBackBar } from '@/components/nav';
 import { BrandLogo } from '@/components/BrandLogo';
 
@@ -118,6 +119,14 @@ export default function LoginPage() {
           </button>
 
           <p className="text-center text-[11px] leading-relaxed text-brand-subtle">{t('login.termsNote')}</p>
+
+          <Link
+            to="/privacy"
+            className="mx-auto flex items-center gap-0.5 text-xs font-semibold text-brand-primary active:opacity-80"
+          >
+            {t('privacy.linkTitle')}
+            <ChevronRight size={13} aria-hidden="true" />
+          </Link>
 
           {(errorKey || redirectError) && (
             <div className="rounded-xl border border-brand-error/25 bg-brand-errorBg p-3" role="alert">

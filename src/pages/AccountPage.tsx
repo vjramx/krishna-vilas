@@ -135,8 +135,16 @@ export default function AccountPage() {
             </Link>
             <p className="text-xs text-brand-subtle">{t('account.guestOrdersHint')}</p>
           </section>
-          {languageSettings}
-        </main>
+            {languageSettings}
+            <Link
+              to="/privacy"
+              className="card flex items-center gap-2 p-4 shadow-soft active:bg-brand-bg"
+            >
+              <ShieldCheck size={18} className="shrink-0 text-brand-primary" aria-hidden="true" />
+              <span className="flex-1 text-left text-sm font-bold">{t('privacy.linkTitle')}</span>
+              <ChevronRight size={18} className="text-brand-subtle" aria-hidden="true" />
+            </Link>
+          </main>
         <BottomNav />
       </div>
     );
@@ -291,13 +299,21 @@ export default function AccountPage() {
         </section>
 
         {/* ---------- Privacy ---------- */}
-        <section className="card p-4">
+        <Link
+          to="/privacy"
+          className="card block p-4 active:bg-brand-bg"
+          aria-label={t('privacy.linkTitle')}
+        >
           <div className="flex items-center gap-2">
             <ShieldCheck size={16} className="text-brand-primary" aria-hidden="true" />
             <h2 className="font-bold">{t('account.privacy')}</h2>
           </div>
           <p className="mt-1 text-sm text-brand-subtle">{t('account.privacyNote')}</p>
-        </section>
+          <p className="mt-2 flex items-center gap-0.5 text-xs font-semibold text-brand-primary">
+            {t('privacy.linkTitle')}
+            <ChevronRight size={14} aria-hidden="true" />
+          </p>
+        </Link>
 
         {/* ---------- Sign out ---------- */}
         <button

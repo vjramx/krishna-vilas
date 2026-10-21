@@ -224,6 +224,7 @@ export const en = {
   'login.tagline': 'Fresh South Indian meals, delivered hot.',
   'login.termsNote': "By continuing you agree to our Terms and Privacy policy. We only collect your name, phone and address to deliver your food.",
   'nav.backHome': 'Back to home',
+  'privacy.linkTitle': 'Privacy policy',
 
   'status.badge': 'Status',
   'err.authRequired': 'Please sign in before placing an order.',

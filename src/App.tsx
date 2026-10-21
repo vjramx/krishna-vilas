@@ -14,6 +14,7 @@ const OrdersPage = lazy(() => import('@/pages/OrdersPage'));
 const OrderDetailPage = lazy(() => import('@/pages/OrderDetailPage'));
 const AccountPage = lazy(() => import('@/pages/AccountPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
+const PrivacyPolicyPage = lazy(() => import('@/pages/PrivacyPolicyPage'));
 
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })));
 const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
@@ -48,6 +49,7 @@ export default function App() {
               <Route path="/order/:id" element={<OrderDetailPage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
               {/* Admin (gate enforced in AdminLayout via RLS-verified role) */}
               <Route path="/admin/login" element={<AdminStaffLogin />} />
