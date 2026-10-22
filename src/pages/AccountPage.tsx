@@ -7,6 +7,7 @@ import { useHotelSettings } from '@/hooks/useHotelSettings';
 import { supabase } from '@/lib/supabase';
 import { BottomNav, TopBackBar } from '@/components/nav';
 import { Spinner } from '@/components/ui';
+import { DeleteAccountCard } from '@/components/DeleteAccountFlow';
 
 /** "Priya S" -> "PS" — first letter of first and last word. */
 function initialsOf(name: string, email: string | null): string {
@@ -314,6 +315,18 @@ export default function AccountPage() {
             <ChevronRight size={14} aria-hidden="true" />
           </p>
         </Link>
+
+        {/* ---------- Danger zone (customers only — staff manage the store) -- */}
+        {role === 'customer' && (
+          <section className="card p-4" aria-labelledby="acc-danger">
+            <h2 id="acc-danger" className="text-sm font-bold uppercase tracking-wide text-brand-subtle">
+              {t('account.dangerZone')}
+            </h2>
+            <div className="mt-3">
+              <DeleteAccountCard email={email} />
+            </div>
+          </section>
+        )}
 
         {/* ---------- Sign out ---------- */}
         <button

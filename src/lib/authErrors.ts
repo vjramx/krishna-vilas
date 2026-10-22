@@ -1,10 +1,16 @@
 export function isCancelledAuthError(error: unknown): boolean {
   const code = (error as { code?: string } | null)?.code ?? '';
-  return code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
+  return (
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request' ||
+    // Native Android bridge: the system account chooser was dismissed.
+    code === 'auth/user-cancelled'
+  );
 }
 
 export function mapLoginErrorMessage(message: string): string | null {
   const value = message.toLowerCase();
+  if (value.includes('no-google-account')) return 'login.noGoogleAccount';
   if (value.includes('unauthorized-domain')) return 'login.unauthorizedDomain';
   if (
     value.includes('operation-not-allowed') ||

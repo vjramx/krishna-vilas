@@ -110,7 +110,7 @@ describe('AccountPage gating', () => {
 
   it('authenticated user sees their profile, My Orders and Sign out', async () => {
     resetState({ loading: false, session: fakeUser, userId: 'u123456', email: 'tester@example.com', role: 'customer' });
-    render(PageRoutes());
+    render(PageRoutes('/'));
     await screen.findByText('tester@example.com');
     expect(screen.getByRole('link', { name: /nav\.orders/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'account.editProfile' })).toBeInTheDocument();

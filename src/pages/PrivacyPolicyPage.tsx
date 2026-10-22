@@ -108,13 +108,18 @@ export default function PrivacyPolicyPage() {
             maintain relevant records, and meet legal requirements.
           </p>
           <p>
-            You may request access to, correction of, or deletion of your personal information by
-            contacting us at the email address provided below. Some information may need to be retained
-            where required by law.
+            You can delete your account and its personal data directly in the app under{' '}
+            <strong className="font-semibold">Account → Delete account</strong>, or request deletion by
+            email to the address below or via our public page at{' '}
+            <a href="/delete-account" className="font-medium text-brand-primary underline active:opacity-80">
+              /delete-account
+            </a>
+            . Some anonymized order records (items, amounts, dates — with all personal data removed) may
+            need to be retained where required by law for accounting, tax, fraud-prevention or
+            dispute-resolution purposes.
           </p>
           <p>
-            If the app allows users to create accounts, an appropriate account-deletion option or request
-            process will also be provided in accordance with applicable Google Play requirements.
+            An active order must be delivered or cancelled before deletion can complete.
           </p>
         </Section>
 
@@ -139,6 +144,10 @@ export default function PrivacyPolicyPage() {
             Subject to applicable law, you may request access to, correction of, or deletion of your
             personal information. You may contact us with questions or concerns about how your
             information is handled.
+          </p>
+          <p>
+            Deleting your account in the app removes your profile and personal data immediately and
+            prevents further use of it; see section 6.
           </p>
         </Section>
 

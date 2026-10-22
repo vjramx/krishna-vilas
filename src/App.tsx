@@ -15,6 +15,7 @@ const OrderDetailPage = lazy(() => import('@/pages/OrderDetailPage'));
 const AccountPage = lazy(() => import('@/pages/AccountPage'));
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const PrivacyPolicyPage = lazy(() => import('@/pages/PrivacyPolicyPage'));
+const PublicDeleteAccountPage = lazy(() => import('@/pages/PublicDeleteAccountPage'));
 
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })));
 const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
@@ -50,6 +51,9 @@ export default function App() {
               <Route path="/account" element={<AccountPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
+
+              {/* Google Play account-deletion URL — public, no header/nav chrome */}
+              <Route path="/delete-account" element={<PublicDeleteAccountPage />} />
 
               {/* Admin (gate enforced in AdminLayout via RLS-verified role) */}
               <Route path="/admin/login" element={<AdminStaffLogin />} />

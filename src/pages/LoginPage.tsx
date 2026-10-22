@@ -13,6 +13,7 @@ import { BrandLogo } from '@/components/BrandLogo';
 /** Map a FirebaseError code from the redirect to a user-actionable message key. */
 function mapRedirectError(code: string): string {
   if (code.includes('unauthorized-domain')) return 'login.unauthorizedDomain';
+  if (code.includes('no-google-account')) return 'login.noGoogleAccount';
   if (
     code.includes('operation-not-allowed') ||
     code.includes('configuration-not-found') ||
