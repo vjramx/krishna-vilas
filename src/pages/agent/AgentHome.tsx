@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
@@ -10,39 +10,35 @@ import { parseKvError } from '@/lib/errors';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
 import type { AssignmentStatus, Order } from '@/types/db';
 import { OrderDestination } from '@/components/OrderDestination';
-import { Phone, MapPin, Banknote, Navigation } from 'lucide-react';
-import { googleMapsDirectionsUrl } from '@/lib/deliveryLocation';
+import { Phone, MapPin, Banknote } from 'lucide-react';
 
-/** Directions for the agent: exact pin when the order carries one, address
- * fallback otherwise. One shared builder so every card opens the same target. */
-function directionsUrl(order: Order): string | null {
-  // PostgREST serializes numeric columns as decimal strings — coerce before use.
-  const latitude = order.delivery_latitude === null ? null : Number(order.delivery_latitude);
-  const longitude = order.delivery_longitude === null ? null : Number(order.delivery_longitude);
-  return googleMapsDirectionsUrl({ latitude, longitude, address: order.address_line, area: order.area });
-}
+// Map navigation is removed everywhere: agent cards show the saved delivery
+// address text instead (see AgentOrderCard) — no directions URLs, no map SDK.
 
 const ASSIGNED_STATUSES: AssignmentStatus[] = ['assigned'];
 const ACTIVE_STATUSES: AssignmentStatus[] = ['accepted', 'picked_up'];
 const DELIVERED_STATUSES: AssignmentStatus[] = ['delivered'];
 
 function useAgentOrders(closedAssignment: AssignmentStatus[]) {
-  const { userId } = useAuth();
+  // The stable assignment key (agent_users.id) is what orders.agent_id
+  // stores — NOT the Firebase uid. Matching by uid silently misses every
+  // auto-assigned order, so wait for the resolved id before querying.
+  const { agentId } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    if (!userId) return;
+    if (!agentId) return;
     void supabase
       .from('orders')
       .select('*')
       // Only this agent's orders: other agents' assignments must never appear,
       // even offline — beneath RLS this also keeps the fetch scoped server-side.
-      .eq('agent_id', userId)
+      .eq('agent_id', agentId)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) setErr(error.message);
-        else setOrders(((data as Order[]) ?? []).filter((o) => o.agent_id === userId && closedAssignment.includes(o.assignment_status)));
+        else setOrders(((data as Order[]) ?? []).filter((o) => o.agent_id === agentId && closedAssignment.includes(o.assignment_status)));
         setLoading(false);
       });
     const ch = supabase
@@ -54,15 +50,28 @@ function useAgentOrders(closedAssignment: AssignmentStatus[]) {
           setOrders((prev) => prev.filter((x) => x.id !== goneId));
           return;
         }
-        if (!closedAssignment.includes(o.assignment_status)) return;
+        // Stable-ID ownership guard mirroring the RLS policy (orders_agent_read):
+        // an assignment to ANOTHER agent must never enter this agent's list,
+        // even if the server-side event filter ever changes underneath.
+        if (o.agent_id !== agentId) return;
+        if (!closedAssignment.includes(o.assignment_status)) {
+          // The row left this tab's slice (assigned → accepted, accepted →
+          // delivered/failed): drop it instead of silently keeping a stale card
+          // — this alone was why Accept "did nothing" until a manual refresh.
+          setOrders((prev) => prev.filter((x) => x.id !== o.id));
+          return;
+        }
         setOrders((prev) => applyRealtime(prev, payload as unknown as { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Order | null; old: { id: string } | null }));
       })
       .subscribe();
     return () => {
       void supabase.removeChannel(ch);
     };
-  }, [userId, closedAssignment]);
-  return { orders, loading, err, setErr };
+  }, [agentId, closedAssignment]);
+  // Deterministic post-success removal: callers drop the card only after the
+  // backend confirmed the write. Failure keeps the row — never optimistic.
+  const removeOrder = useCallback((id: string) => setOrders((prev) => prev.filter((x) => x.id !== id)), []);
+  return { orders, loading, err, setErr, removeOrder };
 }
 
 async function runAgent(fn: string, args: Record<string, unknown>, onErr: (msg: string) => void) {
@@ -83,12 +92,11 @@ async function runAgent(fn: string, args: Record<string, unknown>, onErr: (msg: 
 
 /** Shared card shell so Assigned/Active cards stay structured identically:
  * header (number + step badge), customer block, COD strip, then actions. */
-function AgentOrderCard({ order, busy, headerBadge, actions, highlightNavigate }: {
+function AgentOrderCard({ order, busy, headerBadge, actions }: {
   order: Order;
   busy?: boolean;
   headerBadge?: ReactNode;
   actions: ReactNode;
-  highlightNavigate?: boolean;
 }) {
   const { t } = useLanguage();
   return (
@@ -97,24 +105,20 @@ function AgentOrderCard({ order, busy, headerBadge, actions, highlightNavigate }
         <Link to={`/agent/delivery/${order.id}`} className="min-w-0 truncate font-bold tabular-nums underline-offset-2 hover:underline">{order.order_number}</Link>
         {headerBadge}
       </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold">{order.customer_name}</p>
-        <p className="truncate text-xs text-brand-subtle">{order.area} — {order.address_line}</p>
+      {/* Saved delivery address. Real data only — missing fields are marked,
+          never invented; long addresses wrap (no truncation here, the order
+          detail view carries the full text). */}
+      <div className="min-w-0 grid gap-0.5">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-brand-subtle">{t('agent.deliveryAddress')}</p>
+        <p className="break-words text-sm font-semibold">{order.customer_name}</p>
+        <p className="break-words text-sm">{[order.address_line, order.area].filter(Boolean).join(', ')}</p>
+        <p className="break-words text-xs text-brand-subtle"><b>{t('checkout.landmark')}:</b> <span>{order.landmark || t('agent.notProvided')}</span></p>
+        <p className="break-words text-xs text-brand-subtle"><b>{t('checkout.instructions')}:</b> <span>{order.instructions || t('agent.notProvided')}</span></p>
       </div>
       <div className="flex items-center justify-between gap-2 rounded-xl bg-brand-bg px-3 py-2">
         <span className="flex items-center gap-1 text-sm font-bold tabular-nums"><Banknote size={15} aria-hidden="true" /> {formatRupee(rupeesToPaise(order.total))}</span>
         <a href={`tel:${order.phone}`} className="btn-secondary min-h-11 px-3 text-sm"><Phone size={15} aria-hidden="true" /> <span className="tabular-nums">{order.phone}</span></a>
       </div>
-      {directionsUrl(order) && (
-        <a
-          href={directionsUrl(order)!}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`min-h-11 w-full text-sm ${highlightNavigate ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          <Navigation size={15} aria-hidden="true" /> {t('delivery.navigate')}
-        </a>
-      )}
       {actions}
     </li>
   );
@@ -124,7 +128,7 @@ function AgentOrderCard({ order, busy, headerBadge, actions, highlightNavigate }
 export function AgentAssigned() {
   const { loading } = useAuth();
   const { t } = useLanguage();
-  const { orders, loading: l, err, setErr } = useAgentOrders(ASSIGNED_STATUSES);
+  const { orders, loading: l, err, setErr, removeOrder } = useAgentOrders(ASSIGNED_STATUSES);
   const [busy, setBusy] = useState<string | null>(null);
   const [openOrder, setOpenOrder] = useState<Order | null>(null);
 
@@ -145,10 +149,10 @@ export function AgentAssigned() {
               headerBadge={<span className="badge whitespace-nowrap bg-brand-secondary/15 text-brand-primaryDark">{t('agent.steps.assigned')}</span>}
               actions={
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" className="btn-primary min-h-11 text-sm" disabled={busy === o.id} onClick={() => { setBusy(o.id); void runAgent('agent_accept', { p_order_id: o.id }, (k) => setErr(k)).then(() => setBusy(null)); }}>
+                  <button type="button" className="btn-primary min-h-11 text-sm" disabled={busy === o.id} onClick={() => { setBusy(o.id); void runAgent('agent_accept', { p_order_id: o.id }, (k) => setErr(k)).then((ok) => { setBusy(null); if (ok) removeOrder(o.id); }); }}>
                     {t('agent.accept')}
                   </button>
-                  <button type="button" className="btn-secondary min-h-11 text-sm" disabled={busy === o.id} onClick={() => { setBusy(o.id); void runAgent('agent_decline', { p_order_id: o.id }, (k) => setErr(k)).then(() => setBusy(null)); }}>
+                  <button type="button" className="btn-secondary min-h-11 text-sm" disabled={busy === o.id} onClick={() => { setBusy(o.id); void runAgent('agent_decline', { p_order_id: o.id }, (k) => setErr(k)).then((ok) => { setBusy(null); if (ok) removeOrder(o.id); }); }}>
                     {t('agent.decline')}
                   </button>
                 </div>
@@ -175,7 +179,7 @@ export function AgentAssigned() {
 /* -------------------------------- Active tab --------------------------------- */
 export function AgentActive() {
   const { t } = useLanguage();
-  const { orders, loading: l, err, setErr } = useAgentOrders(ACTIVE_STATUSES);
+  const { orders, loading: l, err, setErr, removeOrder } = useAgentOrders(ACTIVE_STATUSES);
   const [busy, setBusy] = useState<string | null>(null);
   const [handoverOrder, setHandoverOrder] = useState<Order | null>(null);
   const [foodConfirm, setFoodConfirm] = useState(false);
@@ -211,7 +215,6 @@ export function AgentActive() {
                 order={o}
                 busy={busy === o.id}
                 headerBadge={<span className={`badge whitespace-nowrap ${delivered ? 'bg-brand-successBg text-brand-success' : 'bg-brand-secondary/15 text-brand-primaryDark'}`}>{t(`agent.steps.${o.assignment_status}`)}</span>}
-                highlightNavigate
                 actions={
                   <div className="grid gap-3">
                     {delivered ? (
@@ -245,7 +248,7 @@ export function AgentActive() {
             void runAgent('agent_deliver', { p_order_id: handoverOrder.id }, (k) => setErr(k))
               .then((ok) => {
                 setBusy(null);
-                if (ok) { setHandoverOrder(null); setFoodConfirm(false); setCashConfirm(false); }
+                if (ok) { removeOrder(handoverOrder.id); setHandoverOrder(null); setFoodConfirm(false); setCashConfirm(false); }
               });
           }}>
             <p className="rounded-xl bg-brand-bg px-3 py-2 text-sm">
@@ -273,7 +276,7 @@ export function AgentActive() {
             e.preventDefault();
             setBusy(failOrder.id);
             void runAgent('agent_fail', { p_order_id: failOrder.id, p_reason: failReason }, (k) => setErr(k))
-              .then((ok) => { setBusy(null); if (ok) setFailOrder(null); });
+              .then((ok) => { setBusy(null); if (ok) { removeOrder(failOrder.id); setFailOrder(null); } });
           }}>
             <label className="block">
               <span className="label">{t('agent.failReason')}</span>

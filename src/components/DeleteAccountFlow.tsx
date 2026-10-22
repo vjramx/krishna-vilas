@@ -6,7 +6,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
 import { currentFirebaseUser } from '@/lib/firebase';
 import { haptic } from '@/lib/haptics';
-import { reauthenticateWithGoogle } from '@/lib/googleReauth';
+import { reauthenticateWithPassword } from '@/lib/accountReauth';
 import { clearLocalDataAfterDeletion, requestAccountDeletion } from '@/lib/accountDeletion';
 import { supabaseUrl } from '@/lib/supabase';
 
@@ -23,12 +23,14 @@ export function DeleteAccountCard({ email }: { email: string | null }) {
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>('closed');
   const [confirmText, setConfirmText] = useState('');
+  const [password, setPassword] = useState('');
   const [outcome, setOutcome] = useState<{ messageKey: string; detail?: string } | null>(null);
   const [understood, setUnderstood] = useState(false);
 
   const close = () => {
     setStage('closed');
     setConfirmText('');
+    setPassword('');
     setOutcome(null);
     setUnderstood(false);
   };
@@ -41,7 +43,7 @@ export function DeleteAccountCard({ email }: { email: string | null }) {
     setStage('loading');
     try {
       const result = await requestAccountDeletion({
-        reauthenticate: reauthenticateWithGoogle(email),
+        reauthenticate: reauthenticateWithPassword(email, password),
         currentUser: currentFirebaseUser,
         url: supabaseUrl,
       });
@@ -69,7 +71,7 @@ export function DeleteAccountCard({ email }: { email: string | null }) {
     navigate('/', { replace: true });
   }
 
-  const canSubmit = understood && confirmText.trim() === 'DELETE';
+  const canSubmit = understood && confirmText.trim() === 'DELETE' && password.length > 0;
 
   return (
     <>
@@ -142,6 +144,19 @@ export function DeleteAccountCard({ email }: { email: string | null }) {
                     value={confirmText}
                     onChange={(e) => setConfirmText(e.target.value)}
                   />
+                </div>
+                <div>
+                  <label className="label" htmlFor="del-password">{t('delete.passwordLabel')}</label>
+                  <input
+                    id="del-password"
+                    data-testid="delete-password"
+                    type="password"
+                    className="input"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <p className="mt-1 text-xs text-brand-subtle">{t('delete.passwordNote')}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" className="btn-secondary" onClick={close}>{t('common.cancel')}</button>

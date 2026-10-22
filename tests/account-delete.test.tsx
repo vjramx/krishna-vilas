@@ -13,7 +13,6 @@ const h = vi.hoisted(() => ({
     roleError: null as string | null,
     refreshRole: vi.fn(async () => undefined),
     loading: false,
-    redirectError: null as string | null,
     signOut: vi.fn(async () => undefined),
   },
   requestAccountDeletion: vi.fn(),
@@ -29,14 +28,16 @@ const fakeUser = {
 
 vi.mock('@/lib/firebase', () => ({
   firebaseAuth: { fake: true },
-  googleProvider: {},
-  startGoogleSignIn: vi.fn(),
-  usesRedirectFlow: false,
+  signInWithEmail: vi.fn(),
+  registerWithEmail: vi.fn(),
+  sendPasswordReset: vi.fn(),
   currentFirebaseUser: vi.fn(() => fakeUser),
+  signInAsGuest: vi.fn(async () => undefined),
+  isGuestSession: vi.fn(() => false),
 }));
 
-vi.mock('@/lib/googleReauth', () => ({
-  reauthenticateWithGoogle: vi.fn(() => vi.fn(async () => undefined)),
+vi.mock('@/lib/accountReauth', () => ({
+  reauthenticateWithPassword: vi.fn(() => vi.fn(async () => undefined)),
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
@@ -87,7 +88,7 @@ import AccountPage from '@/pages/AccountPage';
 import { clearLocalDataAfterDeletion } from '@/lib/accountDeletion';
 
 function resetState(overrides: Partial<typeof h.state> = {}) {
-  h.state = { ...h.state, session: null, userId: null, email: null, role: 'anon', roleError: null, refreshRole: vi.fn(async () => undefined), loading: false, redirectError: null, ...overrides };
+  h.state = { ...h.state, session: null, userId: null, email: null, role: 'anon', roleError: null, refreshRole: vi.fn(async () => undefined), loading: false, ...overrides };
   h.requestAccountDeletion.mockReset();
   h.state.signOut.mockClear();
   (clearLocalDataAfterDeletion as ReturnType<typeof vi.fn>).mockClear();
@@ -145,6 +146,7 @@ describe('account deletion flow', () => {
     fireEvent.click(screen.getByText('delete.continue'));
     fireEvent.click(screen.getByTestId('delete-understood'));
     fireEvent.change(screen.getByTestId('delete-confirm-input'), { target: { value: 'DELETE' } });
+    fireEvent.change(screen.getByTestId('delete-password'), { target: { value: 'hunter22' } });
     expect(screen.getByTestId('delete-final')).toBeEnabled();
     fireEvent.click(screen.getByTestId('delete-final'));
 
@@ -166,6 +168,7 @@ describe('account deletion flow', () => {
     fireEvent.click(screen.getByText('delete.continue'));
     fireEvent.click(screen.getByTestId('delete-understood'));
     fireEvent.change(screen.getByTestId('delete-confirm-input'), { target: { value: 'DELETE' } });
+    fireEvent.change(screen.getByTestId('delete-password'), { target: { value: 'hunter22' } });
     fireEvent.click(screen.getByTestId('delete-final'));
 
     const alertBox = await screen.findByTestId('delete-error');
@@ -182,6 +185,7 @@ describe('account deletion flow', () => {
     fireEvent.click(screen.getByText('delete.continue'));
     fireEvent.click(screen.getByTestId('delete-understood'));
     fireEvent.change(screen.getByTestId('delete-confirm-input'), { target: { value: 'DELETE' } });
+    fireEvent.change(screen.getByTestId('delete-password'), { target: { value: 'hunter22' } });
     fireEvent.click(screen.getByTestId('delete-final'));
 
     const alertBox = await screen.findByTestId('delete-error');

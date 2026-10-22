@@ -1,14 +1,14 @@
 import { initializeApp } from 'firebase/app';
-import { runGoogleSignInFlow } from '@/lib/googleSignInFlow';
-import { isNativeGoogleBridgeAvailable, requestNativeGoogleSignIn } from '@/lib/nativeAuthBridge';
 import {
-  GoogleAuthProvider,
+  EmailAuthProvider,
   browserLocalPersistence,
+  createUserWithEmailAndPassword,
   getAuth,
+  linkWithCredential,
+  sendPasswordResetEmail,
   setPersistence,
-  signInWithCredential,
-  signInWithPopup,
-  signInWithRedirect,
+  signInAnonymously,
+  signInWithEmailAndPassword,
   type User,
 } from 'firebase/auth';
 
@@ -24,74 +24,64 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const firebaseAuth = getAuth(firebaseApp);
-export const googleProvider = new GoogleAuthProvider();
 
+// Session survives refreshes; private-mode browsers keep it in memory instead.
 void setPersistence(firebaseAuth, browserLocalPersistence).catch(() => {
   /* storage unavailable (private mode) — session stays in memory */
 });
 
-/**
- * Standalone WebViews (Android WebView, iOS in-app browser) block popups —
- * those environments may only use the redirect flow.
- */
-function isEmbeddedWebview(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent;
-  if (/; wv\)/i.test(ua)) return true; // Android WebView
-  return /iPhone|iPod|iPad/.test(ua) && !/Safari/.test(ua); // iOS in-app browser
+/** Email/password sign-in. Throws the raw FirebaseError — the UI maps its code. */
+export async function signInWithEmail(email: string, password: string): Promise<void> {
+  await signInWithEmailAndPassword(firebaseAuth, email, password);
 }
 
-export const usesRedirectFlow = isEmbeddedWebview();
+/**
+ * Guest session (Firebase anonymous auth). Same JWT shape, same `sub` claim —
+ * so orders, RLS and order history work without any schema or policy change;
+ * orders simply attach to this device's session.
+ */
+export async function signInAsGuest(): Promise<void> {
+  if (isGuestSession()) return; // already a guest — reuse the live UID
+  try {
+    await signInAnonymously(firebaseAuth);
+  } catch (e) {
+    const code = (e as { code?: string } | null)?.code;
+    // The Anonymous provider is off in Firebase Console (the Identity Toolkit
+    // API answers banned-identity for a provider that is disabled entirely).
+    // Give it its own marker so the UI shows guest-specific guidance instead
+    // of email/password copy.
+    if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+      throw Object.assign(
+        new Error('Firebase: guest-provider-disabled (auth/operation-not-allowed).'),
+        { code },
+      );
+    }
+    throw e;
+  }
+}
+
+/** True when the current session is an anonymous (guest) Firebase user. */
+export function isGuestSession(): boolean {
+  return firebaseAuth.currentUser?.isAnonymous ?? false;
+}
 
 /**
- * Google sign-in, platform-appropriate flow:
- *  - Desktop/normal browsers: popup. The credential and Firebase session are
- *    established in one direct call — there is no cross-origin redirect return
- *    handshake whose failures the SDK swallows silently.
- *  - Embedded WebViews: redirect. Popups are blocked there; the return trip is
- *    processed explicitly via getRedirectResult() in AuthContext.
+ * Email/password registration. When the visitor is currently a guest, the
+ * anonymous account is *upgraded* in place (linkWithCredential): the UID stays
+ * the same, so any orders placed as a guest carry over to the new account.
  */
-/**
- * Native-bridge cancellation (system account chooser dismissed / Back pressed)
- * reuses Firebase's cancelled error shape so LoginPage treats it identically:
- * quiet busy-state reset, no error banner.
- */
-const cancelledAuthError = (): Error => Object.assign(new Error('sign-in cancelled'), { code: 'auth/user-cancelled' });
+export async function registerWithEmail(email: string, password: string): Promise<void> {
+  const user = firebaseAuth.currentUser;
+  if (user?.isAnonymous) {
+    await linkWithCredential(user, EmailAuthProvider.credential(email, password));
+    return;
+  }
+  await createUserWithEmailAndPassword(firebaseAuth, email, password);
+}
 
-export async function startGoogleSignIn(): Promise<void> {
-  if (import.meta.env.DEV) {
-    console.log(`[auth] starting ${usesRedirectFlow ? 'redirect' : 'popup'} flow${usesRedirectFlow ? ' (embedded WebView)' : ''}`);
-  }
-  // In the Android WebView the native bridge sign-in in directly (Credential
-  // Manager → ID token → signInWithCredential): no OAuth navigation, so the
-  // wrapper never hands the Google/`firebaseapp.com` URLs to Chrome. Chrome
-  // cannot return an OAuth result across the app boundary, and Google blocks
-  // OAuth in embedded WebView user agents — the bridge is the only reliable
-  // in-app flow.
-  if (isNativeGoogleBridgeAvailable()) {
-    const result = await requestNativeGoogleSignIn();
-    if (result.status === 'ok') {
-      await signInWithCredential(firebaseAuth, GoogleAuthProvider.credential(result.token));
-      return;
-    }
-    if (result.status === 'cancelled') throw cancelledAuthError();
-    if (result.status === 'no-credentials') {
-      throw Object.assign(new Error('no Google account available on this device'), {
-        code: 'auth/no-google-account',
-      });
-    }
-    throw Object.assign(new Error(`native sign-in failed (${result.status})`), {
-      code: 'auth/native-bridge-failure',
-    });
-  }
-  await runGoogleSignInFlow({
-    useRedirect: usesRedirectFlow,
-    popup: () => signInWithPopup(firebaseAuth, googleProvider),
-    redirect: () => {
-      if (import.meta.env.DEV && !usesRedirectFlow) console.info('[auth] popup unavailable; falling back to redirect flow');
-      return signInWithRedirect(firebaseAuth, googleProvider);
-    },
-  });
+/** Sends Firebase's password-reset email for an existing account. */
+export async function sendPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(firebaseAuth, email);
 }
 
 export function currentFirebaseUser(): User | null {

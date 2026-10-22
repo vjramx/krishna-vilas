@@ -1,3 +1,5 @@
-OK   0: create or replace function public.kv_delete_account_data( p_
-OK   1: revoke all on function public.kv_delete_account_data(text, t
-OK   2: grant execute on function public.kv_delete_account_data(text
+OK   0: alter table public.orders add column if not exists assigned_
+OK   1: create index if not exists orders_agent_id_idx on public.ord
+OK   2: create or replace function public.admin_confirm_order(p_orde
+OK   3: revoke all on function public.admin_confirm_order(uuid, inte
+OK   4: grant execute on function public.admin_confirm_order(uuid, i

@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { FirebaseError } from 'firebase/app';
-import { getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut, type User } from 'firebase/auth';
+import { onAuthStateChanged, signOut as firebaseSignOut, type User } from 'firebase/auth';
 import { firebaseAuth } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase';
 
@@ -9,6 +8,13 @@ export type Role = 'customer' | 'admin' | 'agent' | 'anon';
 interface AuthValue {
   session: User | null; // firebase user (identity source)
   userId: string | null; // firebase uid — matches RLS `sub` claim
+  /** The STABLE assignment key (agent_users.id, uuid-as-text) for the signed
+   * in delivery agent. Resolved server-side via the agent's own RLS-visible
+   * row — identical contract to kv_agent_id()/pick_auto_assign_agent(), which
+   * is what's actually stored in orders.agent_id. Firebase uid is the identity,
+   * NOT the assignment key: matching orders by it silently misses every
+   * auto-assigned order (0021/0022 store agent_users.id). */
+  agentId: string | null;
   email: string | null;
   role: Role;
   /** Error from the role-resolution RPCs, if one failed (dev diagnostics). */
@@ -17,8 +23,6 @@ interface AuthValue {
    * changes only land in newly issued tokens, so stale sessions need this). */
   refreshRole: () => Promise<void>;
   loading: boolean;
-  /** FirebaseError code (or message) from a failed Google redirect, if any. */
-  redirectError: string | null;
   signOut: () => Promise<void>;
 }
 
@@ -60,8 +64,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => firebaseAuth.currentUser);
   const [role, setRole] = useState<Role>('anon');
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<string | null>(null);
+
+  // Agents need their stable agent_users.id to query/filter their own
+  // assignments (orders.agent_id holds exactly this value). agents_select_own
+  // exposes precisely the caller's row, so an unfiltered single-row read is
+  // the RLS-sanctioned lookup — the client never guesses identity by email
+  // substring or display name.
+  useEffect(() => {
+    let active = true;
+    if (!user || role !== 'agent') {
+      setAgentId((prev) => (prev === null ? prev : null));
+      return;
+    }
+    void supabase
+      .from('agent_users')
+      .select('id')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return;
+        if (import.meta.env.DEV) {
+          console.log('[auth] agent assignment key resolved:', data ? 'ok' : 'missing');
+        }
+        setAgentId((data as { id: string } | null)?.id ?? null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user, role]);
   const [loading, setLoading] = useState(true);
-  const [redirectError, setRedirectError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -76,6 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (next && r.role === 'customer' && !r.roleError) {
         // One minimal upsert per authenticated app session, keyed by verified
         // Firebase subject; SQL excludes admin/agent identities as defense in depth.
+        // Guest (anonymous) sessions are skipped: kv_record_user_activity
+        // requires an email and would only raise AUTH_REQUIRED for them.
+        if (next.isAnonymous) return;
         void (async () => {
           try {
             const { error } = await supabase.rpc('kv_record_user_activity');
@@ -101,41 +135,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
       unsub();
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    // The SDK's automatic redirect handling swallows errors (see
-    // tryRedirectSignIn in @firebase/auth); calling getRedirectResult explicitly
-    // surfaces them so the Sign In page can show a useful message.
-    void getRedirectResult(firebaseAuth)
-      .then((result) => {
-        if (!active) return;
-        if (import.meta.env.DEV) {
-          console.log(
-            `[auth] redirect result ${result?.user ? 'uid=' + result.user.uid.slice(0, 6) + '…' : 'none'} @ ${window.location.pathname}`,
-          );
-        }
-        return null;
-      })
-      .catch((e: unknown) => {
-        if (!active) return;
-        // FirebaseError carries `.code`; be tolerant of wrapped errors too.
-        const info =
-          e instanceof FirebaseError
-            ? e.code
-            : e instanceof Error && 'code' in e
-              ? String((e as { code: unknown }).code)
-              : String(e);
-        if (import.meta.env.DEV) {
-          const msg = e instanceof FirebaseError ? e.message : '';
-          console.error(`[auth] redirect error ${info} ${msg} @ ${window.location.pathname}`);
-        }
-        setRedirectError(info);
-      });
-    return () => {
-      active = false;
     };
   }, []);
 
@@ -185,15 +184,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session: user,
       userId: user?.uid ?? null,
+      agentId,
       email: user?.email ?? null,
       role,
       roleError,
       refreshRole: refreshRoleFn,
       loading,
-      redirectError,
       signOut: signOutFn,
     }),
-    [user, role, roleError, refreshRoleFn, loading, redirectError, signOutFn],
+    [user, role, agentId, roleError, refreshRoleFn, loading, signOutFn],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

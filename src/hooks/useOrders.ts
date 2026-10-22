@@ -58,10 +58,15 @@ function writeCache(userId: string, orders: Order[]): void {
   }
 }
 
-async function fetchPage(offset: number): Promise<{ data: Order[]; error: string | null }> {
+/** Customer-side pagination. ALWAYS scoped to the caller's own rows via the
+ * ownership column — for admins as well. RLS lets an admin read every order
+ * (they need that for the Admin Dashboard), so history-vs-admin separation
+ * must come from the query itself, not from the RLS policy. */
+async function fetchPage(offset: number, customerId: string): Promise<{ data: Order[]; error: string | null }> {
   const { data, error: err } = await supabase
     .from('orders')
     .select('*')
+    .eq('customer_id', customerId)
     .order('created_at', { ascending: false })
     .range(offset, offset + PAGE - 1);
   if (err) return { data: [], error: err.message };
@@ -121,7 +126,7 @@ export function useMyOrders(): {
         setLoading(true);
         setError(null);
       }
-      const { data, error: err } = await fetchPage(0);
+      const { data, error: err } = await fetchPage(0, userId);
       if (err) {
         if (!silent) setError(err);
         return;
@@ -155,15 +160,21 @@ export function useMyOrders(): {
     // shows the spinner until the first network page lands.
     void refresh(cached.length > 0);
 
-    // Realtime: my orders only (RLS filters server-side too). A dropped
-    // connection falls back to polling and re-subscribes with backoff —
-    // missed updates are reconciled by every reconnecting refetch.
+    // Realtime: my orders only. RLS does not distinguish an admin's customer
+    // history from anyone else's (admins read all orders for the dashboard),
+    // so both the channel filter below and the ownership guard in the handler
+    // keep another customer's order out of this screen — even when signed in
+    // as an administrator. A dropped connection falls back to polling and
+    // re-subscribes with backoff; every reconnecting refetch re-scopes by
+    // customer_id, so missed updates are never cross-tenant.
     const channel = supabase
       .channel(`orders-me-${userId.slice(0, 8)}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
+        { event: '*', schema: 'public', table: 'orders', filter: `customer_id=eq.${userId}` },
         (payload) => {
+          const next = payload.new as Order | null;
+          if (next && next.customer_id !== userId) return;
           setOrders((prev) => applyRealtime(prev, payload as unknown as KvRealtimePayload));
           setFromCache(false);
         },
@@ -208,7 +219,7 @@ export function useMyOrders(): {
   const loadMore = async () => {
     if (loading || !hasMore || orders.length === 0 || orders.length >= MAX_PAGES || !userId) return;
     setLoading(true);
-    const { data, error: err } = await fetchPage(orders.length);
+    const { data, error: err } = await fetchPage(orders.length, userId);
     if (err) setError(err);
     else {
       const merged = upsertSorted(orders, data);

@@ -52,6 +52,12 @@ export default function AdminOrders() {
   const [agents, setAgents] = useState<AgentUser[]>([]);
   const [rejectReason, setRejectReason] = useState('');
   const [etaValue, setEtaValue] = useState('15');
+  // Confirm flow (Step B): accepting first asks for an ETA, then the backend
+  // RPC commits status + ETA + auto-assignment in ONE transaction (0022).
+  const [confirmOrder, setConfirmOrder] = useState<OrderWithItems | null>(null);
+  const [confirmEta, setConfirmEta] = useState('15');
+  const confirmEtaNum = Number(confirmEta.trim());
+  const confirmEtaInvalid = confirmEta.trim() === '' || !Number.isInteger(confirmEtaNum) || confirmEtaNum < 1 || confirmEtaNum > 600;
   const [pendingOrderIds, setPendingOrderIds] = useState<Set<string>>(() => new Set());
   const pendingOrderIdsRef = useRef(new Set<string>());
   const [deleteOrdersOpen, setDeleteOrdersOpen] = useState(false);
@@ -113,27 +119,42 @@ export default function AdminOrders() {
 
   const activeAgents = useMemo(() => agents, [agents]);
 
-  /** RPC runner that reports success so multi-step transitions can bail early. */
-  async function rpcCall(fn: 'set_order_status' | 'assign_order' | 'set_order_eta' | 'admin_mark_delivered', args: Record<string, unknown>, orderId: string, opts?: { keepDetailOpen?: boolean }): Promise<boolean> {
-    if (pendingOrderIdsRef.current.has(orderId)) return false;
+  /** RPC runner that reports success so multi-step transitions can bail early.
+   * Returns the RPC's jsonb payload on success (null on failure) so callers can
+   * act on authoritative, post-write server facts instead of local guesses. */
+  async function rpcCall(fn: string, args: Record<string, unknown>, orderId: string, opts?: { keepDetailOpen?: boolean }): Promise<Record<string, unknown> | null> {
+    if (pendingOrderIdsRef.current.has(orderId)) return null;
     pendingOrderIdsRef.current.add(orderId);
     setPendingOrderIds(new Set(pendingOrderIdsRef.current));
     setErr(null);
     try {
-      const { error } = await supabase.rpc(fn, args);
+      const { data, error } = await supabase.rpc(fn, args);
       if (error) {
         setErr(t(parseKvError(error).key));
-        return false;
+        return null;
       }
       if (!opts?.keepDetailOpen) setDetail(null);
-      return true;
+      return (data as Record<string, unknown> | null) ?? {};
     } catch {
       setErr(t('err.generic'));
-      return false;
+      return null;
     } finally {
       pendingOrderIdsRef.current.delete(orderId);
       setPendingOrderIds(new Set(pendingOrderIdsRef.current));
     }
+  }
+
+  /** Merge authoritative post-write fields into every live surface (card list
+   * respects the active tab/period filters exactly like the realtime path) so
+   * the operator sees the new state instantly, without a page refresh. */
+  function mergeOrderUpdate(orderId: string, patch: Partial<Order>) {
+    setOrders((prev) =>
+      prev
+        .map((o) => (o.id === orderId ? { ...o, ...patch } : o))
+        .filter((o) => activeTab.statuses.length === 0 || activeTab.statuses.includes(o.status))
+        .filter((o) => !periodStart || new Date(o.created_at).getTime() >= new Date(periodStart).getTime()),
+    );
+    setDetail((d) => (d && d.id === orderId ? { ...d, ...patch } : d));
   }
 
   function transition(order: OrderWithItems, next: OrderStatus) {
@@ -144,33 +165,42 @@ export default function AdminOrders() {
       return;
     }
     void rpcCall('set_order_status', { p_order_id: order.id, p_new_status: next, p_note: next === 'rejected' ? rejectReason || null : null }, order.id);
-  }  /** Accepting hands the order to the kitchen AND opens the ETA step: the
-   * operator sets the delivery estimate the customer immediately sees. The
-   * backend auto-dispatches the order to the least-loaded active agent in the
-   * same transaction (0013/0018). */
-  async function acceptOrder(order: OrderWithItems) {
-    const ok = await rpcCall(
-      'set_order_status',
-      { p_order_id: order.id, p_new_status: 'confirmed', p_note: null },
-      order.id,
-      { keepDetailOpen: true },
-    );
-    if (ok) {
-      // The backend auto-dispatched the order to the least-loaded active agent
-      // inside the same transaction. Re-read the row (the realtime echo can lag)
-      // so the operator gets an immediate, factual confirmation — or a clear
-      // warning with the manual-assign fallback when no agent was available.
-      const { data: freshRow } = await supabase.from('orders').select('agent_id, assignment_status, eta_minutes').eq('id', order.id).maybeSingle();
-      const fresh = freshRow as Pick<Order, 'agent_id' | 'assignment_status' | 'eta_minutes'> | null;
-      const autoAgent = agents.find((a) => a.id === fresh?.agent_id) ?? null;
-      setNotice(autoAgent ? t('admin.autoAssigned', { agent: autoAgent.name_en }) : t('admin.autoAssignNone'));
+  }
 
-      // The RPC committed, so the row is confirmed; only the freshly assigned
-      // agent and ETA are read back from the row (the realtime echo can lag).
-      const stale = orders.find((x) => x.id === order.id);
-      setDetail({ ...order, status: 'confirmed', agent_id: fresh?.agent_id ?? order.agent_id, assignment_status: fresh?.assignment_status ?? order.assignment_status });
-      setEtaValue(String(stale?.eta_minutes ?? fresh?.eta_minutes ?? order.eta_minutes ?? 15));
+  /** Step B: accepting opens the ETA dialog first — nothing changes on the
+   * server until the operator submits a valid ETA there. Pre-fills the
+   * persisted ETA so re-opening stays consistent. */
+  function openConfirm(order: OrderWithItems) {
+    setConfirmOrder(order);
+    setConfirmEta(String(order.eta_minutes ?? 15));
+  }
+
+  /** Step C/D: submit the ETA → the backend commits confirmation + ETA +
+   * auto-assignment atomically (migration 0022) and returns the post-write
+   * row; the card, detail sheet and notice update from THAT data immediately. */
+  async function submitConfirmEta() {
+    const order = confirmOrder;
+    if (!order) return;
+    const eta = Number(confirmEta.trim());
+    if (!Number.isInteger(eta) || eta < 1 || eta > 600) {
+      setErr(t('err.etaInvalid'));
+      return;
     }
+    const result = await rpcCall('admin_confirm_order', { p_order_id: order.id, p_eta_minutes: eta }, order.id, { keepDetailOpen: true });
+    if (result === null) return; // error already surfaced by rpcCall
+    const freshAgentId = (result.agent_id as string | null | undefined) ?? order.agent_id;
+    const freshAssignment = (result.assignment_status as AssignmentStatus | undefined) ?? order.assignment_status;
+    setConfirmOrder(null);
+    mergeOrderUpdate(order.id, {
+      status: 'confirmed',
+      eta_minutes: eta,
+      agent_id: freshAgentId,
+      assignment_status: freshAssignment,
+      confirmed_at: new Date().toISOString(),
+    });
+    setEtaValue(String(eta));
+    const agentName = freshAgentId ? agents.find((a) => a.id === freshAgentId)?.name_en ?? null : null;
+    setNotice(agentName ? t('admin.autoAssigned', { agent: agentName }) : t('admin.autoAssignNone'));
   }
 
   /** Card actions mirror the operator's authority: accept or cancel a new
@@ -181,7 +211,7 @@ export default function AdminOrders() {
     switch (o.status) {
       case 'pending': return (
         <>
-          <button className="btn-primary text-base" aria-busy={pending} disabled={pending} onClick={() => void acceptOrder(o)}>{t('admin.confirm')}</button>
+          <button className="btn-primary text-base" aria-busy={pending} disabled={pending} onClick={() => openConfirm(o)}>{t('admin.confirm')}</button>
           <button className="btn-secondary text-base text-brand-error" disabled={pending} onClick={() => setDetail(o)}>{t('admin.reject')}</button>
         </>
       );
@@ -355,13 +385,17 @@ export default function AdminOrders() {
 
             {detail.status === 'pending' && (
               <>
+                <button type="button" className="btn-primary" disabled={pendingOrderIds.has(detail.id)} onClick={() => openConfirm(detail)}>{t('admin.confirm')}</button>
                 <label className="label" htmlFor="rej-reason">{t('admin.rejectReasonPrompt')}</label>
                 <input id="rej-reason" className="input" maxLength={120} value={rejectReason} disabled={pendingOrderIds.has(detail.id)} onChange={(e) => setRejectReason(e.target.value)} />
                 <button type="button" className="btn-primary bg-brand-error" disabled={pendingOrderIds.has(detail.id)} onClick={() => transition(detail, 'rejected')}>{t('admin.reject')}</button>
               </>
             )}
 
-            {['pending', 'confirmed', 'preparing'].includes(detail.status) && (
+            {/* ETA editing after acceptance: at accept the ETA is captured in
+                the confirm dialog itself, so the field is for adjustments on
+                already-confirmed/preparing orders only. */}
+            {['confirmed', 'preparing'].includes(detail.status) && (
               <>
                 <label className="label" htmlFor="eta-val">{t('admin.setEta')}</label>
                 <input id="eta-val" className="input tabular-nums" type="number" min={1} max={600} value={etaValue} disabled={pendingOrderIds.has(detail.id)}
@@ -409,6 +443,42 @@ export default function AdminOrders() {
 
             <Link to={`/order/${detail.id}`} className="btn-ghost text-sm">{t('orders.viewDetails')}</Link>
           </div>
+        )}
+      </Sheet>
+
+      {/* Step B dialog: the order is only confirmed once a valid ETA lands on
+          the backend — Cancel leaves it untouched, and the per-order in-flight
+          guard blocks double submissions while the RPC runs. */}
+      <Sheet open={!!confirmOrder} onClose={() => { if (!pendingOrderIds.has(confirmOrder?.id ?? '')) { setConfirmOrder(null); setErr(null); } }} title={t('admin.confirmEtaTitle')}>
+        {confirmOrder && (
+          <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); if (confirmEtaInvalid || pendingOrderIds.has(confirmOrder.id)) return; void submitConfirmEta(); }}>
+            <p className="text-sm text-brand-subtle">{confirmOrder.order_number} · {confirmOrder.customer_name}</p>
+            <label className="label" htmlFor="confirm-eta">{t('admin.setEta')}</label>
+            <input
+              id="confirm-eta"
+              className="input tabular-nums"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={600}
+              autoFocus
+              aria-invalid={confirmEtaInvalid}
+              disabled={pendingOrderIds.has(confirmOrder.id)}
+              value={confirmEta}
+              onChange={(e) => { setConfirmEta(e.target.value); setErr(null); }}
+            />
+            {confirmEtaInvalid && (
+              <p className="text-sm text-brand-error" role="alert">{t('admin.etaInvalid')}</p>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" className="btn-secondary" disabled={pendingOrderIds.has(confirmOrder.id)} onClick={() => { if (!pendingOrderIds.has(confirmOrder.id)) { setConfirmOrder(null); setErr(null); } }}>
+                {t('common.cancel')}
+              </button>
+              <button type="submit" className="btn-primary" disabled={confirmEtaInvalid || pendingOrderIds.has(confirmOrder.id)} aria-busy={pendingOrderIds.has(confirmOrder.id)}>
+                {t('common.confirm')}
+              </button>
+            </div>
+          </form>
         )}
       </Sheet>
     </div>

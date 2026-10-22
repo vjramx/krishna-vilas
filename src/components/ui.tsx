@@ -147,8 +147,13 @@ export function Sheet({
   children,
   desktopDialog = false,
   headerIcon,
-  fullScreen = false,
-  wide = false,
+  /** Item detail: a full-bleed bottom sheet sprung from the very bottom of
+   * the viewport — the scrim dims the whole screen (app bar and tab bar
+   * included) and the panel rises with the shared `sheet-up` animation while
+   * staying capped below the full viewport height, so the menu peeks out
+   * underneath. Children manage their own scroll/padding (image area +
+   * details + pinned action footer). */
+  bottomSheet = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -156,15 +161,7 @@ export function Sheet({
   children: ReactNode;
   desktopDialog?: boolean;
   headerIcon?: ReactNode;
-  /** Item detail: a full-screen view filling the band below the sticky app
-   * bar — the header itself stays visible and unobstructed while it is open.
-   * Children manage their own scroll/padding (image area + details + pinned
-   * action footer). */
-  fullScreen?: boolean;
-  /** fullScreen only: genuine wide surface → edge-to-edge two-column
-   * presentation. Decided in JS from the true device width so WebViews that
-   * mis-report the layout viewport still get the stacked phone layout. */
-  wide?: boolean;
+  bottomSheet?: boolean;
 }) {
   const { t } = useLanguage();
   const ref = useRef<HTMLDivElement>(null);
@@ -184,7 +181,13 @@ export function Sheet({
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
+    // Locking body scroll must never move the page behind the sheet: pin and
+    // restore the document scroll offset around the lock (some engines reset
+    // it when the root becomes unscrollable).
+    const scrollEl = document.scrollingElement;
+    const prevScrollY = scrollEl?.scrollTop ?? 0;
     document.body.style.overflow = 'hidden';
+    if (scrollEl) scrollEl.scrollTop = prevScrollY;
     ref.current?.focus();
 
     // Hardware back should close the sheet, not leave the screen.
@@ -207,6 +210,7 @@ export function Sheet({
       window.removeEventListener('popstate', onPop);
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
+      if (scrollEl) scrollEl.scrollTop = prevScrollY;
       previous?.focus?.();
     };
   }, [open, onClose, close]);
@@ -214,13 +218,10 @@ export function Sheet({
   if (!open) return null;
   return (
     <div
-      className={
-        fullScreen
-          ? 'fixed inset-x-0 bottom-0 z-50 flex flex-col'
-          : `fixed inset-0 z-50 flex flex-col justify-end ${desktopDialog ? 'lg:justify-center lg:px-6 lg:py-6' : ''}`
-      }
-      style={fullScreen ? { top: 'var(--app-header, 56px)' } : undefined}
+      className={`fixed inset-0 z-50 flex flex-col justify-end ${desktopDialog ? 'lg:justify-center lg:px-6 lg:py-6' : ''}`}
     >
+      {/* Dim the entire viewport — app bar and bottom tab bar included — so the
+          sheet reads as one elevated layer over the page (tap to dismiss). */}
       <div className="absolute inset-0 bg-brand-scrim fade-in" onClick={close} aria-hidden="true" />
       <div
         ref={ref}
@@ -229,15 +230,15 @@ export function Sheet({
         aria-modal="true"
         aria-labelledby={titleId}
         className={`sheet-up relative mx-auto flex w-full max-w-app flex-col bg-white shadow-sheet outline-none ${
-          fullScreen
-            ? wide
-              ? 'h-full max-w-none overflow-hidden rounded-none shadow-none'
-              : 'max-h-full overflow-hidden rounded-t-3xl'
+          bottomSheet
+            ? // Spring from the bottom edge, never taller than ~86dvh so part of
+              // the dimmed menu stays visible; content scrolls when taller.
+              'max-h-[86dvh] overflow-hidden rounded-t-3xl'
             : `max-h-[92dvh] rounded-t-3xl ${desktopDialog ? 'lg:max-h-[calc(100dvh-3rem)] lg:max-w-5xl lg:rounded-3xl' : ''}`
         }`}
         style={{ paddingBottom: 'var(--safe-bottom)' }}
       >
-        {fullScreen ? (
+        {bottomSheet ? (
           <>
             <h2 id={titleId} className="sr-only">{title}</h2>
             <button

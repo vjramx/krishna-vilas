@@ -16,12 +16,24 @@ const h = vi.hoisted(() => ({
   catalogRows: [] as { id: string; category_id: string; price: number; name_en: string; name_kn: string; is_active: boolean; is_available: boolean }[],
   offers: [] as { discount_type: 'percent' | 'flat'; discount_value: number; scope: 'item' | 'category' | 'all'; target_id: string | null }[],
   rpc: vi.fn(),
+  signInAsGuest: vi.fn(async () => undefined),
+  currentFirebaseUser: vi.fn(() => ({ isAnonymous: true, uid: 'guest-uid' })),
+  isGuestSession: vi.fn(() => true),
 }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => h.auth }));
 vi.mock('@/hooks/useHotelSettings', () => ({ useHotelSettings: () => h.settings }));
 vi.mock('@/context/LanguageContext', () => ({ useLanguage: () => ({ t: (key: string, values?: Record<string, string>) => values ? `${key} ${JSON.stringify(values)}` : key, lang: 'en' }) }));
 vi.mock('@/context/CartContext', () => ({ useCart: () => h.cart }));
 vi.mock('@/components/nav', () => ({ TopBackBar: () => <header /> }));
+vi.mock('@/lib/firebase', () => ({
+  signInAsGuest: h.signInAsGuest,
+  currentFirebaseUser: h.currentFirebaseUser,
+  isGuestSession: h.isGuestSession,
+  signInWithEmail: vi.fn(),
+  registerWithEmail: vi.fn(),
+  sendPasswordReset: vi.fn(),
+  firebaseAuth: { fake: true },
+}));
 vi.mock('@/lib/supabase', () => ({    supabase: {
       rpc: h.rpc,
       from: vi.fn((table: string) => {
@@ -104,12 +116,37 @@ describe('Checkout recovery', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeEnabled());
   });
 
-  it('offers sign-in with a checkout return instead of a place-order button to guests', () => {
+  it('guests can order without an account: the place-order button stays, sign-in is a secondary link', async () => {
     mount();
-    expect(screen.queryByRole('button', { name: 'checkout.placeOrder' })).toBeNull();
+    // Cart has one default line and valid settings — the guest can submit.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeEnabled());
     for (const link of screen.getAllByRole('link', { name: 'common.signIn' })) {
       expect(link).toHaveAttribute('href', '/login?next=%2Fcheckout');
     }
+    expect(screen.getByText('checkout.guestOk')).toBeInTheDocument();
+  });
+
+  it('signs the guest in anonymously on submit, then places the order with that identity', async () => {
+    mount();
+    // The address block must be valid first — guest auth only kicks in after
+    // client-side validation passes, exactly like a signed-in submission.
+    fireEvent.change(screen.getByLabelText('checkout.name'), { target: { value: 'Priya' } });
+    fireEvent.change(screen.getByLabelText('checkout.phone'), { target: { value: '9876543210' } });
+    fireEvent.change(screen.getByLabelText('checkout.address'), { target: { value: '12 Main Street' } });
+    fireEvent.change(screen.getByLabelText('checkout.area'), { target: { value: 'Karatagi' } });
+    const submit = screen.getByRole('button', { name: 'checkout.placeOrder' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(h.signInAsGuest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(h.rpc).toHaveBeenCalledTimes(1));
+    expect(h.rpc.mock.calls[0][0]).toBe('place_order_with_location');
+  });
+
+  it('shows the blocking reason instead of a dead button when the guest has nothing to order', () => {
+    h.cart.lines = [];
+    mount();
+    expect(screen.getByRole('button', { name: 'checkout.placeOrder' })).toBeDisabled();
+    expect(screen.getAllByText('err.itemsRequired').length).toBeGreaterThan(0);
   });
   it('keeps the form and explicit save preference across reload without opting in by default', () => {
     mount();

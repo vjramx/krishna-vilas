@@ -3,39 +3,11 @@ export interface Coordinates {
   longitude: number;
 }
 
-export interface ConfirmedDeliveryLocation extends Coordinates {
-  accuracyMeters: number | null;
-  source: 'browser_geolocation' | 'map_pin' | 'manual_address';
-  confirmedAt: string;
-}
-
+/** Validate a potentially raw/possibly-null PostgREST coordinate pair.
+ * Still used by customer live tracking and by the saved pin chip. */
 export function isValidCoordinates(value: { latitude?: number | null; longitude?: number | null } | null | undefined): value is Coordinates {
   return !!value && typeof value.latitude === 'number' && typeof value.longitude === 'number'
     && Number.isFinite(value.latitude) && Number.isFinite(value.longitude)
     && value.latitude >= -90 && value.latitude <= 90
     && value.longitude >= -180 && value.longitude <= 180;
-}
-
-export function formatCoordinates(coordinates: Coordinates): string {
-  if (!isValidCoordinates(coordinates)) throw new RangeError('Invalid destination coordinates');
-  return `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}`;
-}
-
-/** Build the free, user-initiated Google Maps directions URL. */
-export function googleMapsDirectionsUrl(destination: {
-  latitude?: number | null;
-  longitude?: number | null;
-  address?: string | null;
-  area?: string | null;
-}): string | null {
-  const coordinates = { latitude: destination.latitude, longitude: destination.longitude };
-  let target: string;
-  if (isValidCoordinates(coordinates)) {
-    target = `${coordinates.latitude},${coordinates.longitude}`;
-  } else {
-    const address = [destination.address, destination.area].filter((part) => typeof part === 'string' && part.trim()).join(', ');
-    if (!address) return null;
-    target = address;
-  }
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(target)}`;
 }

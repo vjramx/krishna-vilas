@@ -5,9 +5,8 @@ import { useAuth } from '@/context/AuthContext';
 import { TopBackBar } from '@/components/nav';
 import { ErrorState, OrderStatusBadge, Spinner } from '@/components/ui';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
-import { Phone, Navigation, Clock } from 'lucide-react';
+import { Phone, Clock } from 'lucide-react';
 import { OrderDestination } from '@/components/OrderDestination';
-import { googleMapsDirectionsUrl } from '@/lib/deliveryLocation';
 import { customerVisibleOrderStatus, customerOrderStatusLabel } from '@/lib/orderPresentation';
 
 export default function AgentDeliveryPage() {
@@ -26,12 +25,8 @@ export default function AgentDeliveryPage() {
     );
   }
 
-  const directionsUrl = googleMapsDirectionsUrl({
-    latitude: order.delivery_latitude === null ? null : Number(order.delivery_latitude),
-    longitude: order.delivery_longitude === null ? null : Number(order.delivery_longitude),
-    address: order.address_line,
-    area: order.area,
-  });
+  // Map navigation removed — the destination card below carries the saved
+  // address text (landmark, instructions) and the tap-to-call phone action.
 
   return (
     <div className="min-h-dvh bg-brand-bg">
@@ -53,11 +48,6 @@ export default function AgentDeliveryPage() {
           <p className="font-bold">{t('agent.customer')}</p>
           <p>{order.customer_name} · <a className="underline tabular-nums" href={`tel:${order.phone}`}><b>{order.phone}</b></a></p>
           <OrderDestination order={order} audience="agent" />
-          {directionsUrl && (
-            <a href={directionsUrl} target="_blank" rel="noopener noreferrer" className="btn-primary mt-2 w-full text-sm">
-              <Navigation size={15} aria-hidden="true" /> {t('delivery.navigate')}
-            </a>
-          )}
           <a href={`tel:${order.phone}`} className="btn-secondary mt-2 w-full text-sm"><Phone size={14} aria-hidden="true" /> <span className="tabular-nums">{order.phone}</span></a>
         </section>
 

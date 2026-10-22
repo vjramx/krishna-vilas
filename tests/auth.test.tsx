@@ -7,13 +7,13 @@ import type { User } from 'firebase/auth';
 type Listener = (u: User | null) => void;
 let listeners: Listener[] = [];
 let snapshot: User | null = null;
-let redirectError: unknown = null;
 
 vi.mock('@/lib/firebase', () => ({
   firebaseAuth: { fake: true },
-  startGoogleSignIn: vi.fn(),
-  isCancelledAuth: vi.fn(),
-  usesRedirectFlow: false,
+  signInWithEmail: vi.fn(),
+  registerWithEmail: vi.fn(),
+  sendPasswordReset: vi.fn(),
+  currentFirebaseUser: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -33,13 +33,11 @@ vi.mock('firebase/auth', async (importOriginal) => {
         listeners = listeners.filter((l) => l !== cb);
       };
     },
-    getRedirectResult: vi.fn(() =>
-      redirectError !== null ? Promise.reject(redirectError) : Promise.resolve({ user: null }),
-    ),
     signOut: vi.fn(async () => {
       snapshot = null;
     }),
     setPersistence: vi.fn(async () => undefined),
+    browserLocalPersistence: 'local',
   };
 });
 
@@ -58,7 +56,7 @@ function emit(next: User | null) {
 }
 
 function Probe() {
-  const { session, userId, email, role, loading, redirectError: rerr } = useAuth();
+  const { session, userId, email, role, loading } = useAuth();
   return (
     <div
       data-testid="probe"
@@ -66,7 +64,6 @@ function Probe() {
       data-user={userId ?? ''}
       data-email={email ?? ''}
       data-role={role}
-      data-redirect={rerr ?? ''}
     >
       {session ? 'signed-in' : 'signed-out'}
     </div>
@@ -76,7 +73,6 @@ function Probe() {
 beforeEach(() => {
   listeners = [];
   snapshot = null;
-  redirectError = null;
 });
 
 describe('AuthContext lifecycle', () => {
@@ -136,16 +132,20 @@ describe('AuthContext lifecycle', () => {
     unmount();
   });
 
-  it('surfaces a failed redirect as redirectError with the Firebase code', async () => {
-    redirectError = Object.assign(new Error('Unauthorized domain'), { code: 'auth/unauthorized-domain' });
+  it('restores the session after a page refresh (auth observer replays the stored user)', async () => {
+    // Simulate a fresh page load where Firebase restores the persisted session.
+    snapshot = fakeUser;
     render(
       <AuthProvider>
         <Probe />
       </AuthProvider>,
     );
-    const probe = screen.getByTestId('probe');
-    await waitFor(() => expect(probe.dataset.redirect).toBe('auth/unauthorized-domain'));
-    expect(probe.dataset.loading).toBe('false');
-    expect(probe.textContent).toContain('signed-out');
+    const probe = await waitFor(() => {
+      const p = screen.getByTestId('probe');
+      expect(p.textContent).toContain('signed-in');
+      return p;
+    });
+    expect(probe.dataset.email).toBe('tester@example.com');
+    expect(probe.dataset.role).toBe('customer');
   });
 });

@@ -13,9 +13,11 @@ const h = vi.hoisted(() => ({
     roleError: null as string | null,
     refreshRole: vi.fn(async () => undefined),
     loading: true,
-    redirectError: null as string | null,
     signOut: vi.fn(async () => undefined),
   },
+  signInWithEmail: vi.fn(async () => undefined),
+  registerWithEmail: vi.fn(async () => undefined),
+  sendPasswordReset: vi.fn(async () => undefined),
 }));
 
 const fakeUser = {
@@ -28,9 +30,12 @@ const fakeUser = {
 
 vi.mock('@/lib/firebase', () => ({
   firebaseAuth: { fake: true },
-  googleProvider: {},
-  startGoogleSignIn: vi.fn(),
-  usesRedirectFlow: false,
+  signInWithEmail: h.signInWithEmail,
+  registerWithEmail: h.registerWithEmail,
+  sendPasswordReset: h.sendPasswordReset,
+  currentFirebaseUser: vi.fn(() => fakeUser),
+  signInAsGuest: vi.fn(async () => undefined),
+  isGuestSession: vi.fn(() => false),
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -70,10 +75,12 @@ vi.mock('@/components/nav', () => ({
 
 import AccountPage from '@/pages/AccountPage';
 import LoginPage from '@/pages/LoginPage';
-import { startGoogleSignIn } from '@/lib/firebase';
 
 function resetState(overrides: Partial<typeof h.state> = {}) {
-  h.state = { ...h.state, session: null, userId: null, email: null, role: 'anon', roleError: null, refreshRole: vi.fn(async () => undefined), loading: true, redirectError: null, ...overrides };
+  h.state = { ...h.state, session: null, userId: null, email: null, role: 'anon', roleError: null, refreshRole: vi.fn(async () => undefined), loading: true, ...overrides };
+  h.signInWithEmail.mockReset();
+  h.registerWithEmail.mockReset();
+  h.sendPasswordReset.mockReset();
 }
 
 function PageRoutes(entry = '/') {
@@ -119,23 +126,93 @@ describe('AccountPage gating', () => {
   });
 });
 
-describe('LoginPage sign-in errors', () => {
-  it('shows a useful error for popup-blocked rather than silently dismissing it', async () => {
-    vi.mocked(startGoogleSignIn).mockRejectedValueOnce(Object.assign(new Error('Popup blocked'), { code: 'auth/popup-blocked' }));
+describe('LoginPage email/password sign-in', () => {
+  it('submits the typed email/password for sign-in and stays quiet on success', async () => {
     resetState({ loading: false });
     render(PageRoutes('/login'));
-    fireEvent.click(screen.getByRole('button', { name: 'login.google' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('login.popupBlocked');
-    expect(screen.getByRole('button', { name: 'login.google' })).toBeEnabled();
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'tester@example.com' } });
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'hunter22' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    await waitFor(() => expect(h.signInWithEmail).toHaveBeenCalledWith('tester@example.com', 'hunter22'));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('does not show an error when the user closes the Google chooser', async () => {
-    vi.mocked(startGoogleSignIn).mockRejectedValueOnce(Object.assign(new Error('Popup closed'), { code: 'auth/popup-closed-by-user' }));
+  it('sign-up: blocks submit when the confirmation password does not match, without calling Firebase', async () => {
     resetState({ loading: false });
     render(PageRoutes('/login'));
-    fireEvent.click(screen.getByRole('button', { name: 'login.google' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'login.google' })).toBeEnabled());
+    fireEvent.click(screen.getByTestId('login-mode-toggle'));
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'tester@example.com' } });
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'hunter22' } });
+    fireEvent.change(screen.getByTestId('login-confirm'), { target: { value: 'hunter23' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('login.passwordMismatch');
+    expect(h.registerWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('sign-up: submits email and password when the confirmation matches', async () => {
+    resetState({ loading: false });
+    render(PageRoutes('/login'));
+    fireEvent.click(screen.getByTestId('login-mode-toggle'));
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'new@example.com' } });
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'hunter22' } });
+    fireEvent.change(screen.getByTestId('login-confirm'), { target: { value: 'hunter22' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    await waitFor(() => expect(h.registerWithEmail).toHaveBeenCalledWith('new@example.com', 'hunter22'));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('sign-in mode has no confirmation field at all', async () => {
+    resetState({ loading: false });
+    render(PageRoutes('/login'));
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'hunter22' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(screen.queryByTestId('login-confirm')).toBeNull();
+  });
+
+  it('maps a wrong password (Firebase invalid-credential) to a clear message and keeps the form usable', async () => {
+    resetState({ loading: false });
+    // FirebaseError embeds its code in the message — mirror that exactly.
+    h.signInWithEmail.mockRejectedValueOnce(new Error('Firebase: Error (auth/invalid-credential).'));
+    render(PageRoutes('/login'));
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'tester@example.com' } });
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'wrongpass1' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('login.invalidCredentials');
+    expect(screen.getByTestId('login-submit')).toBeEnabled();
+  });
+
+  it('blocks locally invalid emails before calling Firebase', async () => {
+    resetState({ loading: false });
+    render(PageRoutes('/login'));
+    // 'user@localhost' passes the browser's native email check but fails the
+    // app's stricter pattern — so the message comes from our own validation.
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'user@localhost' } });
+    fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'hunter22' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('login.invalidEmail');
+    expect(h.signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends a password-reset email and confirms it without exposing account existence', async () => {
+    h.sendPasswordReset.mockResolvedValueOnce(undefined);
+    resetState({ loading: false });
+    render(PageRoutes('/login'));
+    fireEvent.click(screen.getByTestId('login-forgot'));
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'tester@example.com' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    await waitFor(() => expect(h.sendPasswordReset).toHaveBeenCalledWith('tester@example.com'));
+    expect(await screen.findByRole('status')).toHaveTextContent('login.resetSent');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('maps the no-such-account reset reply to the neutral reset notice too', async () => {
+    h.sendPasswordReset.mockRejectedValueOnce(new Error('Firebase: Error (auth/user-not-found).'));
+    resetState({ loading: false });
+    render(PageRoutes('/login'));
+    fireEvent.click(screen.getByTestId('login-forgot'));
+    fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'ghost@example.com' } });
+    fireEvent.click(screen.getByTestId('login-submit'));
+    expect(await screen.findByRole('status')).toHaveTextContent('login.resetSent');
   });
 });
 
@@ -155,7 +232,7 @@ describe('LoginPage transition', () => {
   });
   it('navigates to /account only after a verified Firebase user exists', async () => {
     const { rerender } = render(PageRoutes('/login'));
-    expect(screen.getByRole('button', { name: 'login.google' })).toBeInTheDocument();
+    expect(screen.getByTestId('login-submit')).toBeInTheDocument();
     expect(screen.queryByTestId('at-account')).toBeNull();
 
     // Session confirmed by the auth observer — the page must move on to Account.

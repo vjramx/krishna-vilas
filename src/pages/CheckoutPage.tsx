@@ -11,6 +11,7 @@ import { Sheet, BottomActionBar } from '@/components/ui';
 import { cartTotalsPaise, formatRupee, rupeesToPaise } from '@/lib/money';
 import { parseKvError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
+import { currentFirebaseUser, isGuestSession, signInAsGuest } from '@/lib/firebase';
 import { BadgeCheck, LogIn, Wallet } from 'lucide-react';
 
 const checkoutSchema = z.object({
@@ -237,9 +238,23 @@ export default function CheckoutPage() {
     }
     setErrors({});
     if (!session) {
-      // Not an error: sign in (or tap the CTA) and come straight back here.
-      navigate('/login?next=%2Fcheckout');
-      return;
+      // Guest checkout: order without an account. A Firebase anonymous session
+      // (created here or already on the device) becomes the order's owner —
+      // the backend sees the same JWT subject shape, so no schema/RLS change.
+      setSubmitting(true);
+      setServerError(null);
+      try {
+        await signInAsGuest();
+      } catch {
+        setServerError(t('err.authRequired'));
+        setSubmitting(false);
+        return;
+      }
+      if (!currentFirebaseUser()) {
+        setServerError(t('err.authRequired'));
+        setSubmitting(false);
+        return;
+      }
     }
 
     // Idempotency: reuse the generated key if a previous attempt never got a response.
@@ -323,7 +338,8 @@ export default function CheckoutPage() {
           const { save: _s, ...details } = form;
           window.localStorage.setItem(DETAILS_KEY, JSON.stringify(details));
           void _s;
-          if (userId) {
+          // Guests get no profile row: their details live only in the order.
+          if (userId && !isGuestSession()) {
             await supabase.from('profiles').upsert({ id: userId, display_name: form.name.trim(), phone: form.phone.trim() });
           }
         } catch {
@@ -376,7 +392,7 @@ export default function CheckoutPage() {
                 ? t('checkout.minFoodSubtotalShort', { more: formatRupee(remainingToMin, { withSymbol: false }) })
                 : null;
   const canSubmit =
-    !submitting && !authLoading && !!session && !!settings && !settingsLoading && !settingsUnavailable && !catalogLoading && !catalogError && cart.unavailableIds.length === 0 && !closed && !belowMin && cart.lines.length > 0;
+    !submitting && !authLoading && !!settings && !settingsLoading && !settingsUnavailable && !catalogLoading && !catalogError && cart.unavailableIds.length === 0 && !closed && !belowMin && cart.lines.length > 0;
 
   return (      <div className="min-h-dvh bg-brand-bg">
       <TopBackBar title={t('checkout.title')} />
@@ -435,16 +451,16 @@ export default function CheckoutPage() {
         {signedOut && (
           <section
             className="card mt-3 flex items-center gap-3 border-brand-primary/25 bg-brand-primary/[0.04] p-3.5"
-            aria-label={t('checkout.signInToOrder')}
+            aria-label={t('checkout.guestOk')}
           >
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-primary/10 text-brand-primary" aria-hidden="true">
               <LogIn size={20} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-snug">{t('checkout.signInToOrder')}</p>
-              <p className="text-[12px] leading-snug text-brand-subtle">{t('checkout.signInHint')}</p>
+              <p className="text-sm font-semibold leading-snug">{t('checkout.guestOk')}</p>
+              <p className="text-[12px] leading-snug text-brand-subtle">{t('checkout.guestHint')}</p>
             </div>
-            <Link to="/login?next=%2Fcheckout" className="btn-primary shrink-0 px-4 text-sm">
+            <Link to="/login?next=%2Fcheckout" className="btn-secondary shrink-0 px-3 text-sm">
               {t('common.signIn')}
             </Link>
           </section>
@@ -526,19 +542,15 @@ export default function CheckoutPage() {
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium text-brand-subtle">{t('common.total')}</p>
           <p className="truncate text-lg font-extrabold leading-tight">{formatRupee(totals.total)}</p>
-          {!signedOut && blockedReason && (
+          {blockedReason && (
             <p id="checkout-submit-blocked" className="truncate text-[10px] font-semibold text-brand-warn">{blockedReason}</p>
           )}
         </div>
-        {signedOut ? (
-          <Link to="/login?next=%2Fcheckout" className="btn-primary min-w-0 flex-[1.5] text-[15px]">
-            {t('common.signIn')}
-          </Link>
-        ) : (
-          <button form="checkout-form" type="submit" className="btn-primary min-h-12 min-w-[132px] flex-[1.5] whitespace-nowrap px-3 text-[15px]" disabled={!canSubmit} aria-describedby={!canSubmit && blockedReason ? 'checkout-submit-blocked' : undefined} aria-busy={submitting}>
-            {submitting ? t('checkout.placing') : t('checkout.placeOrder')}
-          </button>
-        )}
+        {/* Guests order here too: placeOrder() signs in anonymously on the fly,
+            so the button is shown regardless of session state. */}
+        <button form="checkout-form" type="submit" className="btn-primary min-h-12 min-w-[132px] flex-[1.5] whitespace-nowrap px-3 text-[15px]" disabled={!canSubmit} aria-describedby={!canSubmit && blockedReason ? 'checkout-submit-blocked' : undefined} aria-busy={submitting}>
+          {submitting ? t('checkout.placing') : t('checkout.placeOrder')}
+        </button>
       </BottomActionBar>
 
       <Sheet open={!!closedInfo} onClose={() => setClosedInfo(null)} title={t('confirm.title')}>

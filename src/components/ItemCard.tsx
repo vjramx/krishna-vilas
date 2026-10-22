@@ -200,12 +200,15 @@ function useLayoutMode(): 'narrow' | 'wide' {
 }
 
 /**
- * Item detail: a FULL-SCREEN **vertical** view that fills the band below the
- * sticky app bar — header stays visible and untouched. Below/at 600 CSS px
+ * Item detail: a **bottom sheet** anchored to the bottom of the viewport —
+ * the scrim dims the whole app (header, menu and tab bar included) while the
+ * panel springs up from the bottom edge, capped below the full viewport so
+ * the underlying menu stays visible and does not jump. Below/at 600 CSS px
  * (phones, zoomed-out WebViews) it is forced to a single column: image on
  * top, badge → name/price → description underneath, pinned action bar last.
  * Only genuinely wide surfaces get the two-column layout. The action bar
- * stays pinned; content scrolls independently when it overflows.
+ * stays pinned above the safe-area inset; content scrolls independently when
+ * it overflows.
  */
 export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: () => void }) {
   const { t, lang } = useLanguage();
@@ -231,7 +234,7 @@ export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: (
   };
 
   return (
-    <Sheet open={!!item} onClose={onClose} title={`${t('menu.details')}: ${name}`} fullScreen wide={wide}>
+    <Sheet open={!!item} onClose={onClose} title={`${t('menu.details')}: ${name}`} bottomSheet>
       {/* Content area: hugs the content on phones (max-h caps at the band;
               long descriptions scroll inside, the bar stays pinned) and fills
               the band on wide surfaces. Vertical order is fixed on phones:

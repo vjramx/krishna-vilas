@@ -2,11 +2,12 @@
  * Client side of account deletion (Google-Play compliant, self-service).
  *
  * Order of operations (matches supabase/functions/delete-account):
- *   1. Google reauthentication — Firebase refreshes auth_time; the backend
+ *   1. Password reauthentication — Firebase refreshes auth_time; the backend
  *      rejects tokens minted older than 10 minutes.
  *   2. Fresh ID token (forceRefresh) is POSTed to the Edge Function, which
- *      verifies it against Google's JWKS and runs the server-side purge +
- *      auth-account deletion. Identity NEVER comes from a client body.
+ *      verifies it against Firebase's public keys (third-party auth) and runs
+ *      the server-side purge + auth-account deletion. Identity NEVER comes
+ *      from a client body.
  *   3. Result codes are mapped to friendly i18n message keys here; the raw
  *      backend detail is never rendered to users.
  */

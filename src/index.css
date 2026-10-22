@@ -73,13 +73,16 @@ body {
 }
 
 /* Visible focus for keyboards, invisible for touch. */
+/* Visible focus for keyboards, invisible for touch. Outline follows the
+   element's own border-radius in every modern engine — do NOT set
+   border-radius here: on :focus-visible it would mutate the element's real
+   corners (e.g. the bottom-sheet dialog's 24px rounded top). */
 :focus {
   outline: none;
 }
 :focus-visible {
   outline: 2px solid #c83e24;
   outline-offset: 2px;
-  border-radius: 6px;
 }
 
 button,

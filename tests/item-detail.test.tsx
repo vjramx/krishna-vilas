@@ -44,16 +44,21 @@ beforeEach(() => {
   h.snackbar.mockClear();
 });
 
-describe('full-screen item detail', () => {
-  it('on a wide surface: fills the band edge-to-edge with the veg, popular and discount badges', () => {
+describe('item detail bottom sheet', () => {
+  it('on a wide surface: bottom sheet (rounded top, height-capped) with two-column layout and the veg, popular and discount badges', () => {
     renderSheet(baseItem);
     const dialog = screen.getByRole('dialog', { hidden: true });
-    // Full-screen view below the app bar; jsdom default width (>600px) is a
-    // wide surface → edge-to-edge two-column, no centered small card.
-    expect(dialog.className).toContain('h-full');
-    expect(dialog.className).toContain('max-w-none');
-    expect(dialog.className).toContain('rounded-none');
-    expect(dialog.className).not.toContain('h-[100dvh]');
+    // Anchored to the bottom, capped below the full viewport, app-width wide
+    // (jsdom default >600px → wide surface, but never a centered card and
+    // never edge-to-edge full-screen anymore).
+    expect(dialog.className).toContain('rounded-t-3xl');
+    expect(dialog.className).toContain('max-h-[86dvh]');
+    expect(dialog.className).toContain('max-w-app');
+    expect(dialog.className).not.toContain('h-full');
+    expect(dialog.className).not.toContain('max-w-none');
+    expect(dialog.className).not.toContain('rounded-none');
+    // The whole viewport is dimmed behind the sheet.
+    expect(document.querySelector('.bg-brand-scrim.fade-in')).not.toBeNull();
     // The hero carries a meaningful alt (it is the product photo, not decor),
     // so it is queryable by name in the accessibility tree.
     const img = screen.getByRole('img', { name: 'Masala Dosa', hidden: true });
@@ -65,13 +70,15 @@ describe('full-screen item detail', () => {
     expect(screen.getByText('33% OFF')).toBeInTheDocument();
   });
 
-  it('forces the vertical single-column phone layout at ≤600 CSS px (no side-by-side, no media queries)', () => {
+  it('forces the vertical single-column phone layout at ≤600 CSS px in the bottom sheet (no side-by-side, no media queries)', () => {
     // Simulate a phone — and a zoomed-out WebView whose visual scale < 1 —
     // where the innerWidth alone could look wide but the device is not.
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     renderSheet(baseItem);
     const dialog = screen.getByRole('dialog', { hidden: true });
     expect(dialog.className).toContain('rounded-t-3xl');
+    expect(dialog.className).toContain('max-h-[86dvh]');
+    expect(dialog.className).toContain('max-w-app');
     expect(dialog.className).not.toContain('max-w-none');
     // No viewport media-query classes anywhere in the forced-mobile tree.
     expect(dialog.textContent).toBeDefined();

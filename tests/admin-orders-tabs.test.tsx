@@ -75,7 +75,7 @@ describe('AdminOrders tabs', () => {
   });
 
   it('locks an order action while its RPC is in flight and handles a thrown request', async () => {
-    let finishRpc!: (result: { data: null; error: null }) => void;
+    let finishRpc!: (result: { data: null; error: null } | Promise<never>) => void;
     h.rpc.mockClear();
     h.rpc.mockImplementationOnce(() => new Promise((resolve) => { finishRpc = resolve }));
     h.from.mockImplementation((table: string) => table === 'orders'
@@ -90,19 +90,32 @@ describe('AdminOrders tabs', () => {
     render(<MemoryRouter><AdminOrders /></MemoryRouter>);
     const confirm = await screen.findByRole('button', { name: 'admin.confirm' });
     fireEvent.click(confirm);
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    // The per-order in-flight guard must drop the second click silently.
+    // Step B: the ETA dialog opens first — no RPC may fire without an ETA.
+    const etaDialog = screen.getByRole('dialog', { name: 'admin.confirmEtaTitle' });
+    const submit = within(etaDialog).getByRole('button', { name: 'common.confirm' });
+    fireEvent.change(within(etaDialog).getByLabelText('admin.setEta'), { target: { value: '25' } });
+
+    // In-flight guard: while the RPC is pending the submit stays disabled and
+    // extra clicks never duplicate the request.
+    fireEvent.click(submit);
     expect(h.rpc).toHaveBeenCalledTimes(1);
-    expect(h.rpc).toHaveBeenNthCalledWith(1, 'set_order_status', { p_order_id: 'order-1', p_new_status: 'confirmed', p_note: null });
+    expect(h.rpc).toHaveBeenNthCalledWith(1, 'admin_confirm_order', { p_order_id: 'order-1', p_eta_minutes: 25 });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(h.rpc).toHaveBeenCalledTimes(1);
 
-    await act(async () => finishRpc({ data: null, error: null }));
-    await waitFor(() => expect(confirm).toBeEnabled());
-
-    h.rpc.mockRejectedValueOnce(new Error('network failed'));
-    fireEvent.click(confirm);
+    // A thrown request surfaces as an error instead of a false success, and
+    // the dialog stays open so the operator can retry.
+    await act(async () => finishRpc(Promise.reject(new Error('network failed'))));
     expect(await screen.findByRole('alert')).toHaveTextContent('err.generic');
-    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(screen.getByRole('dialog', { name: 'admin.confirmEtaTitle' })).toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'admin.confirmEtaTitle' })).getByRole('button', { name: 'common.confirm' })).toBeEnabled());
+
+    // Retry succeeds: h.rpc now resolves (mockResolvedValue set at the end) —
+    // finish the retry in a way that commits a normal sanitized result.
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'admin.confirmEtaTitle' })).getByRole('button', { name: 'common.confirm' }));
+    expect(h.rpc).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin.confirmEtaTitle' })).not.toBeInTheDocument());
     h.rpc.mockResolvedValue({ data: null, error: null });
   });
 
@@ -146,14 +159,30 @@ describe('AdminOrders tabs', () => {
 
     render(<MemoryRouter><AdminOrders /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: 'admin.confirm' }));
-    await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('set_order_status', { p_order_id: 'order-1', p_new_status: 'confirmed', p_note: null }));
-    // Accepting must land the operator straight on the ETA step — not on a
-    // closed sheet they have to reopen.
-    const dialog = await screen.findByRole('dialog', { name: 'KV-1' });
-    expect(within(dialog).getByLabelText('admin.setEta')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'common.save' })).toBeInTheDocument();
-    // The accept-path must state the auto-assignment outcome explicitly: with
-    // no agent row available here, the manual-assign fallback notice shows.
+    const etaDialog = await screen.findByRole('dialog', { name: 'admin.confirmEtaTitle' });
+    expect(within(etaDialog).getByLabelText('admin.setEta')).toBeInTheDocument();
+
+    // Invalid ETAs never reach the backend: 0/js/empty values keep the dialog
+    // open with validation feedback instead of firing the RPC.
+    const etaInput = within(etaDialog).getByLabelText('admin.setEta');
+    for (const bad of ['0', '', '0.5']) {
+      fireEvent.change(etaInput, { target: { value: bad } });
+      expect(within(etaDialog).getByRole('alert')).toHaveTextContent(/admin\.etaInvalid|err\.etaInvalid/);
+      expect(within(etaDialog).getByRole('button', { name: 'common.confirm' })).toBeDisabled();
+      expect(h.rpc).not.toHaveBeenCalledWith('admin_confirm_order', expect.anything());
+    }
+    expect(h.rpc).not.toHaveBeenCalled();
+
+    // A valid ETA goes through the atomic backend RPC — status + ETA + the
+    // auto-assignment outcome commit in one transaction (migration 0022).
+    fireEvent.change(etaInput, { target: { value: '25' } });
+    fireEvent.click(within(etaDialog).getByRole('button', { name: 'common.confirm' }));
+    await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('admin_confirm_order', { p_order_id: 'order-1', p_eta_minutes: 25 }));
+    // The dialog closes on success and the catalog reflects the authoritative
+    // server result without a page refresh.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin.confirmEtaTitle' })).not.toBeInTheDocument());
     expect(await screen.findByText('admin.autoAssignNone')).toBeInTheDocument();
+    // The order card updated immediately: ETA badge shows the submitted value.
+    expect(await screen.findByText(/admin\.etaBadge/)).toBeInTheDocument();
   });
 });

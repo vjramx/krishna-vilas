@@ -18,7 +18,7 @@ describe('Admin role invitation migration', () => {
     const deliverRpc = orderManagementMigration.slice(orderManagementMigration.indexOf('function public.agent_deliver'));
     expect(deliverRpc).toMatch(/function public\.agent_deliver\(p_order_id uuid\)/);
     expect(deliverRpc).not.toMatch(/p_pin/);
-    expect(deliverRpc).toMatch(/v_order\.delivered_at is not null\n     or v_order\.cod_collected is not null/);
+    expect(deliverRpc).toMatch(/v_order\.delivered_at is not null\n {5}or v_order\.cod_collected is not null/);
     expect(deliverRpc).toMatch(/assignment_status not in \('accepted', 'picked_up'\)/);
     expect(deliverRpc).toMatch(/FINAL_STATE/);
     expect(deliverRpc).toMatch(/revoke all on function public\.agent_deliver\(uuid\) from public, anon, authenticated/);

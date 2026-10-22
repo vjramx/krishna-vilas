@@ -22,18 +22,21 @@ import type { Order } from '@/types/db';
  * keeps the alert state consistent even across reconnects.
  */
 function AgentAssignmentNotifier() {
-  const { userId } = useAuth();
+  // Seed + classify against the stable assignment key (agent_users.id) — the
+  // exact value kv_agent_id()/0022 write into orders.agent_id. Firebase uid is
+  // the identity, never the assignment key.
+  const { agentId } = useAuth();
   const { t } = useLanguage();
   const navigate = useNavigate();
   useEffect(() => {
-    if (!userId) return;
+    if (!agentId) return;
     let seeded = false;
     const known = new Set<string>();
     let cancelled = false;
     void supabase
       .from('orders')
       .select('id, agent_id, assignment_status')
-      .eq('agent_id', userId)
+      .eq('agent_id', agentId)
       .in('assignment_status', ['assigned'])
       .then(({ data }) => {
         if (cancelled) return;
@@ -46,7 +49,7 @@ function AgentAssignmentNotifier() {
         const o = payload.new as Order | null;
         // DELETE carries only the old row: it cannot be a fresh assignment.
         if (!o || !o.id) return;
-        const fired = applyAssignmentDelta(known, o, userId, { seeded });
+        const fired = applyAssignmentDelta(known, o, agentId, { seeded });
         if (!fired) return;
         haptic(30);
         showSnackbar(`${o.order_number} · ${t('agent.newAssignment')}`, {
@@ -59,7 +62,7 @@ function AgentAssignmentNotifier() {
       cancelled = true;
       void supabase.removeChannel(channel);
     };
-  }, [userId, t, navigate]);
+  }, [agentId, t, navigate]);
   return null;
 }
 
