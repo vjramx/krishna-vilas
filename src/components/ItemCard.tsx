@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { haptic } from '@/lib/haptics';
 
-function FoodImage({ item, className, iconSize = 24, alt = '' }: { item: MenuItem; className: string; iconSize?: number; /** Meaningful alt for the detail hero; tiles keep it decorative. */ alt?: string }) {
+function FoodImage({ item, className, iconSize = 24, alt = '', fit = 'cover' }: { item: MenuItem; className: string; iconSize?: number; /** Meaningful alt for the detail hero; tiles keep it decorative. */ alt?: string; /** Small square tiles crop to fill; large bands can show the whole dish without cutting edges. */ fit?: 'cover' | 'contain' }) {
   // Broken/missing photos must collapse into a clean placeholder instead of a
   // blank tile: the error state lives beside the fetch state, per instance.
   const url = item.image_path ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/food-images/${item.image_path}` : null;
@@ -26,7 +26,7 @@ function FoodImage({ item, className, iconSize = 24, alt = '' }: { item: MenuIte
       alt={alt}
       loading="lazy"
       decoding="async"
-      className={`${className} bg-brand-border/40 object-cover`}
+      className={`${className} bg-brand-border/40 ${fit === 'cover' ? 'object-cover' : 'object-contain'}`}
       onError={() => setBroken(true)}
     />
   );
@@ -256,7 +256,10 @@ export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: (
               : 'relative w-full min-w-0 h-[38dvh] min-h-[190px] shrink-0'
           }
         >
-          <FoodImage item={item} className="absolute inset-0 h-full w-full" iconSize={48} alt={name} />
+          {/* The hero band is wider than the (usually square) food photo;
+              contain keeps the entire dish visible instead of cropping its
+              edges; the tinted backdrop fills the leftover bands. */}
+          <FoodImage item={item} className="absolute inset-0 h-full w-full" iconSize={48} alt={name} fit="contain" />
           {!item.image_path && (
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-secondary/5 to-brand-secondary/10" aria-hidden="true" />
           )}
