@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { registerWithEmail, sendPasswordReset, signInAsGuest, signInWithEmail } from '@/lib/firebase';
+import { registerWithEmail, sendPasswordReset, sendVerificationEmail, signInAsGuest, signInWithEmail } from '@/lib/firebase';
+import { firebaseAuth } from '@/lib/firebase';
 import { authErrorKey } from '@/lib/authErrors';
 import { publicImageUrl } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
@@ -30,6 +31,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [noticeKey, setNoticeKey] = useState<string | null>(null);
+  // Re-check trigger: Firebase mutates the live user object in place on
+  // reload(), which React cannot observe — the poll bumps this tick so the
+  // routing effect re-evaluates session.emailVerified and lifts the gate.
+  const [verifyTick, setVerifyTick] = useState(0);
 
   const name = settings ? (lang === 'kn' ? settings.name_kn : settings.name_en) : t('app.name');
   const logo = publicImageUrl(settings?.logo_path ?? null);
@@ -38,17 +43,46 @@ export default function LoginPage() {
   // always dropping them on the customer Account page. A guest (anonymous)
   // session stays on this page — the email forms remain useful for upgrading —
   // but an explicit checkout return link is honored immediately.
+  //
+  // An email session that is NOT yet verified is held here with a verify-your-
+  // inbox notice: the backend only trusts verified email claims (0003
+  // is_allowed_issuer), so routing an unverified user into the app would leave
+  // every listed/RLS read failing with no explanation. The session is reloaded
+  // periodically so the gate lifts the moment Firebase sees the verification.
   useEffect(() => {
     if (loading || !session || role === 'anon') return; // wait: role still resolving
     if (session.isAnonymous) {
       if (returnToCheckout) navigate('/checkout', { replace: true });
       return;
     }
+    if (!session.emailVerified) {
+      setNoticeKey('login.verifyRequired');
+      const poll = window.setInterval(() => {
+        void firebaseAuth.currentUser
+          ?.reload()
+          .then(() => setVerifyTick((tick) => tick + 1))
+          .catch(() => undefined);
+      }, 5000);
+      // Re-enable the form so the resend action works while we wait.
+      setBusy(false);
+      return () => window.clearInterval(poll);
+    }
     const to = returnToCheckout ? '/checkout' : role === 'admin' ? '/admin' : role === 'agent' ? '/agent' : '/account';
     if (import.meta.env.DEV)
       console.log(`[auth] signed in as role=${role} email=${email ?? '—'}; /login → ${to}`);
     navigate(to, { replace: true });
-  }, [loading, session, role, email, navigate, returnToCheckout]);
+  }, [loading, session, role, email, navigate, returnToCheckout, verifyTick]);
+
+  async function resendVerification() {
+    if (busy) return;
+    setNoticeKey(null);
+    try {
+      await sendVerificationEmail();
+      setNoticeKey('login.verifySent');
+    } catch (e) {
+      setErrorKey(authErrorKey(e instanceof Error ? e.message : String(e)));
+    }
+  }
 
   function forget() {
     setErrorKey(null);
@@ -112,6 +146,13 @@ export default function LoginPage() {
           // Upgrading a guest mutates the same Firebase user in place, so no
           // auth-state event fires — route explicitly to the ordered account.
           navigate(returnToCheckout ? '/checkout' : '/account', { replace: true });
+        } else {
+          // Account created; a verification email is already on its way
+          // (registerWithEmail sends it). The routing effect holds the user
+          // here until the Firebase session reports a verified email, then
+          // directs staff to their workspace or customers to Account.
+          setNoticeKey('login.verifyRequired');
+          setBusy(false);
         }
       }
     } catch (e) {
@@ -322,6 +363,19 @@ export default function LoginPage() {
             <div className="rounded-xl border border-brand-success/30 bg-brand-successBg p-3" role="status">
               <p className="text-sm text-brand-success">{t(noticeKey)}</p>
             </div>
+          )}
+
+          {/* Verify-your-email gate: shown while the email session is held unverified. */}
+          {session && !session.isAnonymous && !session.emailVerified && (
+            <button
+              type="button"
+              data-testid="login-verify-resend"
+              className="btn-secondary mx-auto w-fit px-4 text-sm font-semibold text-brand-primary active:opacity-80"
+              disabled={busy}
+              onClick={() => void resendVerification()}
+            >
+              {t('login.verifyResend')}
+            </button>
           )}
 
           {errorKey && (

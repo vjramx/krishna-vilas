@@ -18,13 +18,19 @@ const h = vi.hoisted(() => ({
   signInWithEmail: vi.fn(async () => undefined),
   registerWithEmail: vi.fn(async () => undefined),
   sendPasswordReset: vi.fn(async () => undefined),
+  sendVerificationEmail: vi.fn(async () => undefined),
 }));
 
 const fakeUser = {
   uid: 'u123456',
   email: 'tester@example.com',
+  // Verified: registered users land on their workspace only after the
+  // verification gate in LoginPage lifts.
+  emailVerified: true,
   displayName: 'Tester',
   photoURL: 'https://example.com/a.png',
+  isAnonymous: false,
+  reload: async () => undefined,
   getIdToken: async () => 'not-a-real-token',
 } as unknown as User;
 
@@ -36,6 +42,7 @@ vi.mock('@/lib/firebase', () => ({
   currentFirebaseUser: vi.fn(() => fakeUser),
   signInAsGuest: vi.fn(async () => undefined),
   isGuestSession: vi.fn(() => false),
+  sendVerificationEmail: h.sendVerificationEmail,
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -81,6 +88,7 @@ function resetState(overrides: Partial<typeof h.state> = {}) {
   h.signInWithEmail.mockReset();
   h.registerWithEmail.mockReset();
   h.sendPasswordReset.mockReset();
+  h.sendVerificationEmail.mockReset();
 }
 
 function PageRoutes(entry = '/') {
@@ -213,6 +221,30 @@ describe('LoginPage email/password sign-in', () => {
     fireEvent.change(screen.getByTestId('login-email'), { target: { value: 'ghost@example.com' } });
     fireEvent.click(screen.getByTestId('login-submit'));
     expect(await screen.findByRole('status')).toHaveTextContent('login.resetSent');
+  });
+
+  // Verification gate: the backend only trusts verified email claims (0003
+  // is_allowed_issuer), so an unverified email session must be held on this
+  // page with a resend option — never routed into a workspace whose data
+  // reads would all be silently rejected by RLS.
+  it('holds an unverified email session on /login with a resend option, without routing away', async () => {
+    const unverified = { ...fakeUser, emailVerified: false } as unknown as User;
+    resetState({ loading: false, session: unverified, userId: 'u123456', email: 'tester@example.com', role: 'customer' });
+    render(PageRoutes('/login'));
+    expect(await screen.findByRole('status')).toHaveTextContent('login.verifyRequired');
+    expect(screen.queryByTestId('at-account')).toBeNull();
+    expect(screen.queryByTestId('at-checkout')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('login-verify-resend'));
+    await waitFor(() => expect(h.sendVerificationEmail).toHaveBeenCalledTimes(1));
+  });
+
+  it('routes a verified session onward — the gate only holds unverified sessions', async () => {
+    const { rerender } = render(PageRoutes('/login'));
+    resetState({ loading: false, session: fakeUser, userId: 'u123456', email: 'tester@example.com', role: 'customer' });
+    rerender(PageRoutes('/login'));
+    await waitFor(() => expect(screen.getByTestId('at-account')).toBeInTheDocument());
+    expect(screen.queryByTestId('login-verify-resend')).toBeNull();
   });
 });
 

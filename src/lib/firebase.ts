@@ -5,6 +5,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   linkWithCredential,
+  sendEmailVerification,
   sendPasswordResetEmail,
   setPersistence,
   signInAnonymously,
@@ -69,14 +70,33 @@ export function isGuestSession(): boolean {
  * Email/password registration. When the visitor is currently a guest, the
  * anonymous account is *upgraded* in place (linkWithCredential): the UID stays
  * the same, so any orders placed as a guest carry over to the new account.
+ *
+ * A verification email is always sent: the backend matches admin/agent roles
+ * on the verified-token email claim, so an unverified mailbox must never be
+ * treated as proof of identity (see 0003_firebase_identity.is_allowed_issuer).
  */
 export async function registerWithEmail(email: string, password: string): Promise<void> {
   const user = firebaseAuth.currentUser;
   if (user?.isAnonymous) {
-    await linkWithCredential(user, EmailAuthProvider.credential(email, password));
+    const { user: linked } = await linkWithCredential(user, EmailAuthProvider.credential(email, password));
+    if (linked && linked.email && !linked.emailVerified) {
+      await sendEmailVerification(linked);
+    }
     return;
   }
-  await createUserWithEmailAndPassword(firebaseAuth, email, password);
+  const { user: created } = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+  await sendEmailVerification(created);
+}
+
+/**
+ * Sends the email-verification message again for the current session. Used by
+ * both the “verify your email” step after signing up and the resend action.
+ * The caller (UI) maps Firebase errors — e.g. too-many-requests throttling.
+ */
+export async function sendVerificationEmail(): Promise<void> {
+  const user = firebaseAuth.currentUser;
+  if (!user || user.isAnonymous || user.emailVerified) return;
+  await sendEmailVerification(user);
 }
 
 /** Sends Firebase's password-reset email for an existing account. */
