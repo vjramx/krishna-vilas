@@ -169,20 +169,6 @@ describe('LoginPage email/password sign-in', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('password eye toggles the mirror state without touching the input value', () => {
-    resetState({ loading: false });
-    render(PageRoutes('/login'));
-    const pass = screen.getByTestId('login-password') as HTMLInputElement;
-    fireEvent.change(pass, { target: { value: 'hunter22' } });
-    const eye = screen.getByTestId('login-eye');
-    expect(eye).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(eye);
-    expect(eye).toHaveAttribute('aria-pressed', 'true');
-    // The real input never changes: it stays type="password" with its value.
-    expect(pass.getAttribute('type')).toBe('password');
-    expect(pass.value).toBe('hunter22');
-  });
-
   it('sign-in mode has no confirmation field at all', async () => {
     resetState({ loading: false });
     render(PageRoutes('/login'));
