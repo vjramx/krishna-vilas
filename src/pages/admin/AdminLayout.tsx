@@ -15,12 +15,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
+import { useHotelSettings } from '@/hooks/useHotelSettings';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Sheet, Spinner } from '@/components/ui';
 
 export function AdminLayout() {
   const { role, roleError, refreshRole, email, loading, session, signOut } = useAuth();
   const { t, lang } = useLanguage();
+  const { data: settings } = useHotelSettings();
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -49,16 +51,20 @@ export function AdminLayout() {
     return <Navigate to="/admin/login" state={{ from: location }} replace />;
   }
 
+  // Self delivery hides the Agents section everywhere in admin: the owner
+  // delivers themselves from the orders dashboard, so agent management is
+  // meaningless noise while the mode is on.
+  const selfDelivery = settings?.fulfillment_mode === 'self';
   const tabs = [
     { to: '/admin', label: t('admin.dashboard'), icon: <LayoutDashboard size={18} aria-hidden="true" />, end: true },
     { to: '/admin/orders', label: t('admin.orders'), icon: <ClipboardList size={18} aria-hidden="true" />, end: false },
     { to: '/admin/menu', label: t('admin.menu'), icon: <UtensilsCrossed size={18} aria-hidden="true" />, end: false },
-    { to: '/admin/agents', label: t('admin.agents'), icon: <Bike size={18} aria-hidden="true" />, end: false },
+    { to: '/admin/agents', label: t('admin.agents'), icon: <Bike size={18} aria-hidden="true" />, end: false, selfOnly: true },
     { to: '/admin/cod', label: t('admin.cod'), icon: <Banknote size={18} aria-hidden="true" />, end: false },
     { to: '/admin/settings', label: t('admin.settings'), icon: <Settings size={18} aria-hidden="true" />, end: false },
     { to: '/admin/access', label: t('admin.access'), icon: <ShieldCheck size={18} aria-hidden="true" />, end: false },
     { to: '/admin/users', label: t('admin.usersNav'), icon: <Users size={18} aria-hidden="true" />, end: false },
-  ];
+  ].filter((tab) => !('selfOnly' in tab && tab.selfOnly && selfDelivery));
 
   const signOutNow = () => void signOut().then(() => navigate('/', { replace: true }));
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { EmptyState, ErrorState, Sheet, Spinner } from '@/components/ui';
 import { MailPlus, Search, ShieldCheck, ShieldX, Trash2, UserPlus } from 'lucide-react';
@@ -43,7 +44,6 @@ const STATUS_ACTIONS: Record<string, string> = {
   ADMIN_INVITATION_CONFLICT: 'admin.access.errConflict',
   AUTH_REQUIRED: 'admin.access.noManagementAccess',
   CANNOT_REMOVE_SELF: 'admin.access.errRemoveSelf',
-  CANNOT_REMOVE_SUPER_ADMIN: 'admin.access.errRemoveSuper',
   USER_NOT_SIGNED_UP: 'admin.access.userNotSignedUp',
   LAST_SUPER_ADMIN: 'admin.access.errLastSuper',
 };
@@ -54,6 +54,9 @@ function fmtDate(iso: string, locale: string): string {
 
 export default function AdminAccess() {
   const { t, lang } = useLanguage();
+  // Own email (lower-cased once) so the super admin's row never shows the
+  // delete action — staff_remove_admin refuses self-removal server-side.
+  const meEmail = useAuth().email?.toLowerCase();
   const [state, setState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSuper, setIsSuper] = useState(false);
@@ -401,7 +404,7 @@ export default function AdminAccess() {
                 >
                   {a.role === 'super_admin' ? t('admin.access.roleSuper') : t('admin.access.roleAdmin')}
                 </span>
-                {isSuper && a.role !== 'super_admin' && (
+                {isSuper && a.email.toLowerCase() !== meEmail && (
                   <button
                     type="button"
                     className="grid h-11 w-11 place-items-center rounded-lg text-brand-error active:bg-brand-errorBg"

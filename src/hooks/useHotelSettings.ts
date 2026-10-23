@@ -4,6 +4,16 @@ import { supabase } from '@/lib/supabase';
 
 let cached: HotelSettings | null = null;
 
+/** Cross-screen sync: when any screen writes + refetches settings (e.g. the
+ * Settings page flips the fulfillment mode), every other mounted hook mirrors
+ * the new row immediately instead of serving its own stale snapshot. */
+type SettingsListener = (row: HotelSettings) => void;
+const listeners = new Set<SettingsListener>();
+function publish(row: HotelSettings) {
+  cached = row;
+  for (const listener of listeners) listener(row);
+}
+
 /**
  * Business settings (hours, fees, minimum order). Cached for the session, but
  * every screen can `retry()` — a failed fetch must never dead-end checkout.
@@ -13,6 +23,13 @@ export function useHotelSettings() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!cached);
   const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (cached) setData(cached);
+    const listener: SettingsListener = (row) => setData(row);
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -39,7 +56,7 @@ export function useHotelSettings() {
         if (err || !row) {
           setError(err?.message ?? 'Settings unavailable');
         } else {
-          cached = row;
+          publish(row);
           setData(row);
         }
       } catch (err: unknown) {

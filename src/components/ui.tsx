@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import {
   AlertTriangle,
   Ban,
+  Check,
   CheckCircle2,
   Clock,
   Minus,
@@ -15,6 +16,57 @@ import {
 import type { OrderStatus } from '@/types/db';
 import { useLanguage } from '@/context/LanguageContext';
 import { haptic } from '@/lib/haptics';
+
+export function StatusSwitch({
+  checked,
+  onChange,
+  busy = false,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  busy?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={busy}
+      onClick={() => {
+        haptic(6);
+        onChange(!checked);
+      }}
+      className={`tap relative grid h-11 w-[76px] shrink-0 place-items-center rounded-2xl transition-colors disabled:opacity-60 ${
+        checked ? 'bg-brand-successBg' : 'bg-brand-errorBg'
+      }`}
+    >
+      {/* 76×44 guaranteed touch target wrapping a Material-style 54×28 track. */}
+      <span
+        aria-hidden="true"
+        className={`relative flex h-7 w-[54px] items-center rounded-full transition-colors duration-200 ${
+          checked ? 'bg-brand-success' : 'bg-brand-border'
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 grid h-6 w-6 place-items-center rounded-full bg-white shadow-elev1 transition-transform duration-200 ${
+            checked ? 'translate-x-[24px] text-brand-success' : 'text-brand-subtle'
+          }`}
+        >
+          {checked ? <Check size={14} strokeWidth={3} /> : <X size={14} strokeWidth={3} />}
+        </span>
+      </span>
+      {busy && (
+        <span
+          aria-hidden="true"
+          className="absolute h-4 w-4 animate-spin rounded-full border-2 border-brand-border border-t-brand-primary"
+        />
+      )}
+    </button>
+  );
+}
 
 export function Spinner({ label }: { label?: string }) {
   return (

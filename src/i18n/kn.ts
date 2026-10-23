@@ -1,7 +1,7 @@
 /** Kannada resource bundle — keys must mirror en.ts exactly (tested). */
 export const kn = {
   'app.name': 'ಕೃಷ್ಣ ವಿಲಾಸ್',
-  'app.tagline': 'ದಕ್ಷಿಣ ಭಾರತೀಯ ಅಂಗಡಿ · ಮನೆಗೆ ವಿತರಣೆ · ನಗದು ಮೇಲೆ ತಲುಪಿಸುವಿಕೆ',
+  'app.tagline': 'ಕರಟಗಿ - 583229 · ಮನೆಗೆ ಆಹಾರ ವಿತರಣೆ',
 
   'nav.menu': 'ಮೆನು',
   'nav.cart': 'ಕಾರ್ಟ್',
@@ -50,6 +50,9 @@ export const kn = {
   'menu.soldOut': 'ಮುಗಿದಿದೆ',
   'menu.discount': '{{pct}}% ರಿಯಾಯಿತಿ',
   'menu.noDescription': 'ವಿವರಣೆ ಇನ್ನೂ ಇಲ್ಲ.',
+  'menu.filters': 'ಮೆನು ಫಿಲ್ಟರ್‌ಗಳು',
+  'menu.resultsCount': '{count} ಅಡುಗೆಗಳು',
+  'menu.clearAll': 'ಎಲ್ಲವನ್ನೂ ತೆರವುಗೊಳಿಸಿ',
 
   'cart.title': 'ಕಾರ್ಟ್',
   'cart.empty': 'ನಿಮ್ಮ ಕಾರ್ಟ್ ಖಾಲಿಯಾಗಿದೆ.',
@@ -95,6 +98,7 @@ export const kn = {
   'checkout.addressRequired': 'ಪೂರ್ಣ ವಿಳಾಸ ನಮೂದಿಸಿ.',
   'checkout.areaRequired': 'ನಿಮ್ಮ ಪ್ರದೇಶ ನಮೂದಿಸಿ.',
   'checkout.notAccepting': 'ರೆಸ್ಟೋರೆಂಟ್ ಈಗ ಆರ್ಡರ್ ಸ್ವೀಕರಿಸುತ್ತಿಲ್ಲ.',
+  'home.ordersPaused': 'ಈಗ ಆರ್ಡರ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸಲಾಗುತ್ತಿಲ್ಲ',
   'checkout.closed': 'ರೆಸ್ಟೋರೆಂಟ್ ಮುಚ್ಚಿದೆ ({hours}).',
   'checkout.minOrder': 'ಕನಿಷ್ಠ ಆರ್ಡರ್ ₹{amount}. ಇನ್ನೂ ₹{more} ಸೇರಿಸಿ.',
   'checkout.minFoodSubtotal': 'ಆಹಾರದ ಕನಿಷ್ಠ ಮೊತ್ತ ₹{amount}. ಆಹಾರಕ್ಕೆ ಇನ್ನೂ ₹{more} ಸೇರಿಸಿ; ವಿತರಣಾ ಶುಲ್ಕ ಇದರಲ್ಲಿ ಸೇರುವುದಿಲ್ಲ.',
@@ -201,6 +205,7 @@ export const kn = {
   'account.staffPortal': 'ಸಿಬ್ಬಂದಿ ಪೋರ್ಟಲ್ ತೆರೆಯಿರಿ',
   'account.help': 'ಸಹಾಯ ಮತ್ತು ಸಂಪರ್ಕ',
   'account.helpNote': 'ಆರ್ಡರ್ ಬಗ್ಗೆ ಯಾವುದೇ ಪ್ರಶ್ನೆಗೆ ರೆಸ್ಟೋರೆಂಟ್‌ಗೆ ಕರೆ ಮಾಡಿ — ನಾವು ಸಹಾಯ ಮಾಡಲು ಸಂತೋಷ.',
+  'account.contactPerson': 'ಶ್ಯಾಮ್ ಮಂಜುನಾಥ',
 
   'login.title': 'ಸೈನ್ ಇನ್',
   'login.signinTitle': 'ಸೈನ್ ಇನ್',
@@ -450,9 +455,23 @@ export const kn = {
   'admin.callAgent': 'ಏಜೆಂಟ್‌ಗೆ ಕರೆ ಮಾಡಿ',
   'admin.openNow': 'ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಲಾಗುತ್ತಿದೆ',
   'admin.acceptingOrders': 'ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಲಾಗುತ್ತಿದೆ',
+  'admin.acceptingOrdersHint': 'ಅಡುಗೆಮನೆ ಬಿಡುವಿಲ್ಲದಿರುವಾಗ್ ಇದನ್ನು ಸ್ವಿಚ್ ಆಫ್ ಮಾಡಿ — ಗ್ರಾಹಕರ ಮುಖಪುಟದಲ್ಲಿ ದಪ್ಪ ಬ್ಯಾನರ್ ತಕ್ಷಣ ಕಾಣುತ್ತದೆ.',
   'admin.pauseOrders': 'ಹೊಸ ಆರ್ಡರ್ ತಡೆಗಟ್ಟಿ',
   'admin.resumeOrders': 'ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಲು ಪ್ರಾರಂಭಿಸಿ',
   'admin.openSoon': '{time} ಕ್ಕೆ ತೆರೆಯುತ್ತದೆ',
+
+  'admin.deliveryMode': 'ವಿತರಣಾ ವಿಧಾನ',
+  'admin.selfDelivery': 'ಸ್ವಯಂ ವಿತರಣೆ',
+  'admin.deliveryAgents': 'ವಿತರಣಾ ಸಿಬ್ಬಂದಿ',
+  'admin.selfDeliveryTagline': 'ಪ್ರತಿ ಆರ್ಡರ್ ನೀವೇ ವಿತರಿಸುತ್ತೀರಿ',
+  'admin.agentModeTagline': 'ವಿತರಣಾ ಸಿಬ್ಬಂದಿ ಸೈನ್ ಇನ್ ಆಗಿ ವಿತರಿಸುತ್ತಾರೆ',
+  'admin.selfDeliveryHint': 'ಸ್ವಯಂ ವಿತರಣೆ ಆನ್ ಆಗಿದೆ: ಏಜೆಂಟ್‌ಗಳ ವಿಭಾಗ ಮರೆಮಾಡಲಾಗಿದೆ ಮತ್ತು ಯಾರಿಗೂ ಆರ್ಡರ್ ನಿಯೋಜಿಸಲಾಗುವುದಿಲ್ಲ. ಪ್ರತಿ ಆರ್ಡರ್‌ನ ಗ್ರಾಹಕರ ವಿಳಾಸ ಮತ್ತು ಟ್ಯಾಪ್-ಟು-ಕಾಲ್ ದೂರವಾಣಿ ಸಂಖ್ಯೆ ಆರ್ಡರ್‌ಗಳ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್‌ನಲ್ಲಿ ಕಾಣುತ್ತದೆ — ನೀವೇ ವಿತರಿಸಬಹುದು.',
+  'admin.agentModeHint': 'ಏಜೆಂಟ್ ವಿತರಣೆ ಆನ್ ಆಗಿದೆ: ನೀವು ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಿದ ಕ್ಷಣದಲ್ಲೇ ಅದು ಕಡಿಮೆ ಕೆಲಸ ಇರುವ ಸಕ್ರಿಯ ಏಜೆಂಟ್‌ಗೆ ಸ್ವಯಂಚಾಲಿತವಾಗಿ ನಿಯೋಜಿಸಲ್ಪಡುತ್ತದೆ, ವಿತರಣೆ ಏಜೆಂಟ್ ಆ್ಯಪ್‌ನಿಂದ ಪೂರ್ಣಗೊಳ್ಳುತ್ತದೆ.',
+  'admin.saveMode': 'ವಿಧಾನ ಉಳಿಸಲಾಗುತ್ತಿದೆ…',
+  'admin.selfDeliverySaved': 'ಸ್ವಯಂ ವಿತರಣೆ ಆನ್ ಆಗಿದೆ — ಏಜೆಂಟ್‌ಗಳ ವಿಭಾಗ ಈಗ ಮರೆಮಾಡಲಾಗಿದೆ.',
+  'admin.agentModeSaved': 'ವಿತರಣಾ ಸಿಬ್ಬಂದಿ ಮತ್ತೆ ಆನ್ ಆಗಿದೆ.',
+  'admin.agentsSelfDeliveryCard': 'ಸ್ವಯಂ ವಿತರಣೆ ಆನ್ ಆಗಿದೆ. ಈಗ ಕೃಷ್ಣ ವಿಲಾಸ್ ಆರ್ಡರ್‌ಗಳನ್ನು ಸ್ವತಃ ವಿತರಿಸುತ್ತದೆ — ಏಜೆಂಟ್‌ಗಳು ತಾತ್ಕಾಲಿಕವಾಗಿ ನಿಷ್ಕ್ರಿಯ. ಅವರನ್ನು ಮರಳಿ ತರಲು ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ವಿಧಾನ ಬದಲಿಸಿ.',
+  'admin.selfDeliveryConfirm': 'ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಿ — ನೀವೇ ವಿತರಿಸುತ್ತೀರಿ',
 
   'admin.addMenuItem': 'ಹೊಸ ಅಡುಗೆ ಸೇರಿಸಿ',
   'admin.editItem': 'ಮೆನು ವಸ್ತು ಬದಲಿಸಿ',

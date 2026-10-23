@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   rpc: vi.fn(),
   isSuper: true,
+  meEmail: 'owner@example.com',
   admins: [] as unknown[],
   invitations: [] as unknown[],
   t: (key: string) => key,
@@ -24,10 +25,14 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/context/LanguageContext', () => ({
   useLanguage: () => ({ lang: 'en', t: h.t }),
 }));
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ email: h.meEmail }),
+}));
 import AdminAccess from '@/pages/admin/AdminAccess';
 
 beforeEach(() => {
   h.isSuper = true;
+  h.meEmail = 'owner@example.com';
   h.admins = [];
   h.invitations = [];
   h.adminQueryError = null;
@@ -126,6 +131,27 @@ describe('Admin access role lifecycle', () => {
     expect(screen.getByRole('heading', { name: 'admin.access.roleDifferences' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('admin.access.noManagementAccess');
     expect(screen.queryByRole('heading', { name: 'admin.access.inviteTitle' })).toBeNull();
+  });
+
+  it('lets the super admin delete any other admin — including another super admin — but never their own row', async () => {
+    h.admins = [
+      { id: 'a1', email: 'owner@example.com', role: 'super_admin', created_at: '2026-10-01T00:00:00Z' },
+      { id: 'a2', email: 'other.owner@example.com', role: 'super_admin', created_at: '2026-10-02T00:00:00Z' },
+      { id: 'a3', email: 'helper@example.com', role: 'admin', created_at: '2026-10-03T00:00:00Z' },
+    ];
+    render(<AdminAccess />);
+
+    // Wait for the directory to load before asserting on its rows.
+    await screen.findByText('other.owner@example.com');
+
+    // Every admin except the caller's own row gets a delete action.
+    expect(screen.getByRole('button', { name: 'admin.access.remove other.owner@example.com' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'admin.access.remove helper@example.com' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'admin.access.remove owner@example.com' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'admin.access.remove other.owner@example.com' }));
+    await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('staff_remove_admin', { p_email: 'other.owner@example.com' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('admin.access.removed');
   });
 
   it('surfaces backend authorization errors and always releases the busy state', async () => {

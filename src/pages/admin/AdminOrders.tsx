@@ -5,6 +5,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { OrderStatusBadge, Sheet, Spinner } from '@/components/ui';
 import { parseKvError } from '@/lib/errors';
 import { applyRealtime } from '@/hooks/useOrders';
+import { useHotelSettings } from '@/hooks/useHotelSettings';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
 import type { AgentUser, AssignmentStatus, Order, OrderStatus } from '@/types/db';
 import { Clock, Phone, Trash2 } from 'lucide-react';
@@ -42,6 +43,10 @@ interface OrderWithItems extends Order {
 
 export default function AdminOrders() {
   const { t, lang } = useLanguage();
+  const { data: settings } = useHotelSettings();
+  // Self delivery: the owner delivers themselves — no agent assignment UI, and
+  // the cards become the kitchen/delivery controls instead of agent status.
+  const selfDelivery = settings?.fulfillment_mode === 'self';
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'all';
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
@@ -112,10 +117,11 @@ export default function AdminOrders() {
   }, [activeTab, statusFilter, periodStart]);
 
   useEffect(() => {
+    if (settings?.fulfillment_mode === 'self') return; // nobody to dispatch to
     supabase.from('agent_users').select('*').order('name_en').then(({ data }) => {
       setAgents(((data as AgentUser[]) ?? []).filter((a) => a.is_active));
     });
-  }, [tab]);
+  }, [tab, settings]);
 
   const activeAgents = useMemo(() => agents, [agents]);
 
@@ -199,13 +205,18 @@ export default function AdminOrders() {
       confirmed_at: new Date().toISOString(),
     });
     setEtaValue(String(eta));
+    if (selfDelivery) {
+      // Self delivery: no dispatch happens, so the assignment notices would lie.
+      setNotice(t('admin.selfDeliveryConfirm'));
+      return;
+    }
     const agentName = freshAgentId ? agents.find((a) => a.id === freshAgentId)?.name_en ?? null : null;
     setNotice(agentName ? t('admin.autoAssigned', { agent: agentName }) : t('admin.autoAssignNone'));
-  }
-
-  /** Card actions mirror the operator's authority: accept or cancel a new
-   * order. Everything after that is the delivery agent's job — the list shows
-   * where the assignment stands instead of kitchen buttons. */
+  }  /** Card actions mirror the operator's authority: accept or cancel a new
+   * order. In agent mode everything after that is the delivery agent's job —
+   * the list shows where the assignment stands instead of kitchen buttons.
+   * In self mode the owner IS the courier, so the cards carry the whole chain
+   * (start cooking → ready → out for delivery → delivered). */
   const actionsFor = (o: OrderWithItems) => {
     const pending = pendingOrderIds.has(o.id);
     switch (o.status) {
@@ -218,7 +229,24 @@ export default function AdminOrders() {
       case 'confirmed':
       case 'preparing':
       case 'ready':
-      case 'out_for_delivery':
+      case 'out_for_delivery': {
+        if (selfDelivery) {
+          // Self mode: the next kitchen/delivery step, driven by the owner.
+          const next = o.status === 'confirmed' ? 'preparing' : o.status === 'preparing' ? 'ready' : o.status === 'ready' ? 'out_for_delivery' : 'delivered';
+          const label = next === 'delivered' ? t('admin.markDelivered') : t(`order.status.${next as OrderStatus}`);
+          const urgent = next === 'out_for_delivery' || next === 'delivered';
+          return (
+            <button
+              type="button"
+              className={`col-span-2 min-h-11 ${urgent ? 'btn-primary' : 'btn-secondary'}`}
+              aria-busy={pending}
+              disabled={pending}
+              onClick={() => transition(o, next)}
+            >
+              {label}
+            </button>
+          );
+        }
         return o.agent_id ? (
           <p className="col-span-2 rounded-xl bg-brand-bg px-3 py-2 text-xs font-semibold text-brand-primary" role="status">
             🛵 {t('admin.agentHandles', { agent: agents.find((a) => a.id === o.agent_id)?.name_en ?? t('order.agent') })}
@@ -228,9 +256,9 @@ export default function AdminOrders() {
             {t('admin.assignInDetails')}
           </p>
         );
+      }
       default: return <span className="col-span-2 text-xs text-brand-subtle">{t('err.finalState')}</span>;
     }
-
 
   };
 
@@ -259,6 +287,7 @@ export default function AdminOrders() {
   }
 
   const assignmentBadge = (o: OrderWithItems) => {
+    if (selfDelivery) return null; // nothing is ever dispatched in self mode
     const asg = o.assignment_status as AssignmentStatus;
     if (asg === 'none' && o.status !== 'pending' && o.status !== 'rejected') return <span className="badge bg-brand-warnBg text-brand-warn">{t('admin.assignAgent')}</span>;
     if (asg === 'delivered') return <span className="badge bg-brand-successBg text-brand-success">✓ {t('agent.steps.delivered')}</span>;
@@ -330,7 +359,7 @@ export default function AdminOrders() {
                       {t('admin.etaBadge', { minutes: String(o.eta_minutes) })}
                     </span>
                   )}
-                  {o.agent_id ? (
+                  {o.agent_id && !selfDelivery ? (
                     <span className="badge bg-brand-secondary/15 text-brand-primaryDark">
                       🛵 {agents.find((a) => a.id === o.agent_id)?.name_en ?? t('order.agent')}
                     </span>
@@ -406,7 +435,9 @@ export default function AdminOrders() {
               </>
             )}
 
-            {['confirmed', 'preparing', 'ready', 'out_for_delivery'].includes(detail.status) && (
+            {/* Self delivery: nobody to assign — the owner completes the run
+                with the delivered button below instead. */}
+            {['confirmed', 'preparing', 'ready', 'out_for_delivery'].includes(detail.status) && !selfDelivery && (
               <div>
                 <label className="label" htmlFor="asg-agent">{detail.agent_id ? t('admin.reassign') : t('admin.assignAgent')}</label>
                 <select
@@ -429,8 +460,12 @@ export default function AdminOrders() {
             )}
 
             {/* Rescue completion: if the agent app could not attest delivery,
-                the operator can close out a dispatched order from here. */}
-            {detail.status === 'out_for_delivery' && (
+                the operator can close out a dispatched order from here. In
+                self delivery the owner attests every completion like this —
+                admin_mark_delivered accepts any live kitchen state. */}
+            {(selfDelivery
+              ? ['confirmed', 'preparing', 'ready', 'out_for_delivery'].includes(detail.status)
+              : detail.status === 'out_for_delivery') && (
               <button
                 type="button"
                 className="btn-secondary text-brand-error"
@@ -449,7 +484,11 @@ export default function AdminOrders() {
       {/* Step B dialog: the order is only confirmed once a valid ETA lands on
           the backend — Cancel leaves it untouched, and the per-order in-flight
           guard blocks double submissions while the RPC runs. */}
-      <Sheet open={!!confirmOrder} onClose={() => { if (!pendingOrderIds.has(confirmOrder?.id ?? '')) { setConfirmOrder(null); setErr(null); } }} title={t('admin.confirmEtaTitle')}>
+      <Sheet
+        open={!!confirmOrder}
+        onClose={() => { if (!pendingOrderIds.has(confirmOrder?.id ?? '')) { setConfirmOrder(null); setErr(null); } }}
+        title={selfDelivery ? t('admin.selfDeliveryConfirm') : t('admin.confirmEtaTitle')}
+      >
         {confirmOrder && (
           <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); if (confirmEtaInvalid || pendingOrderIds.has(confirmOrder.id)) return; void submitConfirmEta(); }}>
             <p className="text-sm text-brand-subtle">{confirmOrder.order_number} · {confirmOrder.customer_name}</p>

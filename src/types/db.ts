@@ -31,6 +31,10 @@ export interface HotelSettings {
   closed_weekdays: number[];
   is_accepting_orders: boolean;
   is_open_override: boolean | null;
+  /** How orders reach the customer: 'agent' = dispatch to delivery agents,
+   * 'self' = the owner delivers themselves (auto-dispatch off, agents
+   * section hidden in admin). */
+  fulfillment_mode: 'agent' | 'self';
   delivery_fee: number; // rupees, numeric from DB
   min_order_total: number;
   delivery_areas: string[];

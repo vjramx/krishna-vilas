@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
-import { Sheet } from '@/components/ui';
+import { useHotelSettings } from '@/hooks/useHotelSettings';
+import { Sheet, Spinner } from '@/components/ui';
 import { parseKvError } from '@/lib/errors';
 import type { AgentUser, Order } from '@/types/db';
-import { Eye, Plus } from 'lucide-react';
+import { Bike, Eye, Plus, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function AdminAgents() {
   const { t } = useLanguage();
+  const { data: settings, loading: settingsLoading } = useHotelSettings();
   const [agents, setAgents] = useState<AgentUser[]>([]);
   const [activeOrders, setActiveOrders] = useState<Order[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -65,6 +67,26 @@ export default function AdminAgents() {
     else setAgents((prev) => prev.map((a) => (a.id === agent.id ? { ...a, is_active: !a.is_active } : a)));
     setBusy(false);
   }
+
+  // Self delivery: the owner does the run themselves, so the agent
+  // management surface (and its direct-URL access) becomes an explanation,
+  // not a working screen.
+  if (settings?.fulfillment_mode === 'self') {
+    return (
+      <section className="card grid gap-3 p-6 text-center" data-testid="agents-self-delivery">
+        <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-secondary/15 text-brand-primaryDark" aria-hidden="true">
+          <Bike size={26} />
+        </span>
+        <p className="text-sm font-extrabold text-brand-text">{t('admin.selfDelivery')}</p>
+        <p className="mx-auto max-w-sm text-sm leading-snug text-brand-subtle">{t('admin.agentsSelfDeliveryCard')}</p>
+        <Link to="/admin/settings" className="btn-secondary mx-auto w-fit text-sm">
+          <Settings size={15} aria-hidden="true" /> {t('admin.settings')}
+        </Link>
+      </section>
+    );
+  }
+
+  if (settingsLoading) return <Spinner label={t('common.loading')} />;
 
   return (
     <div className="grid gap-3">

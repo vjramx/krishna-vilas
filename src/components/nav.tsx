@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Home, ShoppingBag, ClipboardList, User, ChevronLeft, Lock } from 'lucide-react';
+import { Home, ShoppingBag, ClipboardList, User, ChevronLeft, Lock, PauseCircle } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
@@ -81,7 +81,8 @@ export function CustomerHeader({ title }: { title?: string }) {
         </div>
       </div>
       {!settings?.is_accepting_orders && settings && (
-        <p className="bg-brand-primaryDark px-3 pb-1.5 text-center text-[11px] font-medium" role="status">
+        <p className="flex items-center justify-center gap-1.5 bg-brand-primaryDark px-3 py-1 text-center text-[12px] font-bold" role="status">
+          <PauseCircle size={14} className="shrink-0" aria-hidden="true" />
           {t('checkout.notAccepting')}
         </p>
       )}

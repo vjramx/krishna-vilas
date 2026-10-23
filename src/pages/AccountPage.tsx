@@ -297,6 +297,15 @@ export default function AccountPage() {
               <span className="tabular-nums">{settings.phone}</span>
             </a>
           )}
+          {/* Direct contact person — always shown, one tap to call. */}
+          <a
+            href="tel:9398093890"
+            className={`btn-secondary w-full text-sm font-semibold ${settings?.phone ? 'mt-2' : 'mt-3'}`}
+          >
+            <Phone size={16} aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate text-left">{t('account.contactPerson')}</span>
+            <span className="tabular-nums">9398093890</span>
+          </a>
         </section>
 
         {/* ---------- Privacy ---------- */}

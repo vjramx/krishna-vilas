@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { useHotelSettings } from '@/hooks/useHotelSettings';
-import { OrderStatusBadge, Spinner } from '@/components/ui';
+import { OrderStatusBadge, Spinner, StatusSwitch } from '@/components/ui';
 import { isMissingRpcFunction, parseKvError } from '@/lib/errors';
 import { formatRupee, rupeesToPaise } from '@/lib/money';
 import type { Order, OrderStatus } from '@/types/db';
@@ -154,7 +154,7 @@ export default function AdminDashboard() {
 
       {settings && <section className="card flex flex-wrap items-center justify-between gap-3 p-4" aria-label={t('admin.restaurantStatus')}>
         <div className="flex min-w-0 items-center gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${settings.is_accepting_orders ? 'bg-brand-successBg text-brand-success' : 'bg-brand-errorBg text-brand-error'}`}><Store size={19} aria-hidden="true" /></span><div className="min-w-0"><h2 className="text-sm font-bold">{t('admin.restaurantStatus')}</h2><p className="text-sm text-brand-subtle">{settings.is_accepting_orders ? t('admin.openNow') : t('admin.pauseOrders')} · {settings.opens_at.slice(0, 5)}–{settings.closes_at.slice(0, 5)}</p></div></div>
-        <button type="button" role="switch" aria-checked={settings.is_accepting_orders} aria-label={t('admin.acceptingOrders')} className={`btn min-h-[44px] ${settings.is_accepting_orders ? 'bg-brand-successBg text-brand-success' : 'bg-brand-errorBg text-brand-error'}`} disabled={settingsBusy} onClick={() => void toggleAccepting()}>{settingsBusy ? t('common.loading') : settings.is_accepting_orders ? t('admin.openNow') : t('admin.resumeOrders')}</button>
+        <StatusSwitch checked={settings.is_accepting_orders} busy={settingsBusy} label={t('admin.acceptingOrders')} onChange={() => void toggleAccepting()} />
       </section>}
 
       <section className="grid gap-2" aria-labelledby="overview-orders-heading">

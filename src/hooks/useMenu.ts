@@ -111,12 +111,19 @@ export function useMenu(): MenuState {
   };
 }
 
-export function filterMenu(items: MenuItem[], query: string, categoryId: string | null, dietary: 'all' | 'veg' | 'non-veg' = 'all'): MenuItem[] {
+export function filterMenu(items: MenuItem[], query: string, categoryId: string | null, dietary: 'all' | 'veg' | 'non-veg' = 'all', opts?: Partial<{ sort: MenuSort; offersOnly: boolean }>): MenuItem[] {
   const q = query.trim().toLowerCase();
-  return items.filter((item) => {
+  const sort = opts?.sort ?? 'popular';
+  const offersOnly = opts?.offersOnly ?? false;
+  const priceOf = (item: MenuItem): number => Number(item.price) || 0;
+  const filtered = items.filter((item) => {
     if (categoryId && item.category_id !== categoryId) return false;
     if (dietary === 'veg' && !item.is_vegetarian) return false;
     if (dietary === 'non-veg' && item.is_vegetarian) return false;
+    if (offersOnly) {
+      const orig = item.original_price ? Number(item.original_price) : 0;
+      if (!(orig > priceOf(item))) return false;
+    }
     if (!q) return true;
     return (
       item.name_en.toLowerCase().includes(q) ||
@@ -125,7 +132,16 @@ export function filterMenu(items: MenuItem[], query: string, categoryId: string 
       (item.description_kn ?? '').includes(query.trim())
     );
   });
+  // Sort AFTER filtering, on a copy — the order the kitchen publishes never
+  // changes at the source. Stable sorts keep the original fetch order as the
+  // tiebreak. "Popular" simply floats the featured dishes to the top.
+  if (sort === 'price-asc') return [...filtered].sort((a, b) => priceOf(a) - priceOf(b));
+  if (sort === 'price-desc') return [...filtered].sort((a, b) => priceOf(b) - priceOf(a));
+  return [...filtered].sort((a, b) => Number(!!b.is_featured) - Number(!!a.is_featured));
 }
+
+/** Home-page sort options; 'popular' is the neutral default. */
+export type MenuSort = 'popular' | 'price-asc' | 'price-desc';
 
 export function groupByCategory(items: MenuItem[], categories: Category[]): { cat: Category; items: MenuItem[] }[] {
   const map = new Map<string, MenuItem[]>();

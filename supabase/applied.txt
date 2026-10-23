@@ -1,5 +1,7 @@
-OK   0: alter table public.orders add column if not exists assigned_
-OK   1: create index if not exists orders_agent_id_idx on public.ord
-OK   2: create or replace function public.admin_confirm_order(p_orde
-OK   3: revoke all on function public.admin_confirm_order(uuid, inte
-OK   4: grant execute on function public.admin_confirm_order(uuid, i
+OK   0: alter table public.hotel_settings add column if not exists f
+OK   1: alter table public.hotel_settings drop constraint if exists
+OK   2: alter table public.hotel_settings add constraint hotel_setti
+OK   3: comment on column public.hotel_settings.fulfillment_mode is
+OK   4: create or replace function public.pick_auto_assign_agent() r
+OK   5: revoke all on function public.pick_auto_assign_agent() from
+OK   6: grant execute on function public.pick_auto_assign_agent() to
