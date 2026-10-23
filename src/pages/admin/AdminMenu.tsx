@@ -108,21 +108,6 @@ export default function AdminMenu() {
     };
   }, [attempt]);
 
-  async function toggleAvailability(item: MenuItem) {
-    setBusy(true);
-    setErr(null);
-    try {
-      const { error } = await supabase.from('menu_items')
-        .update({ is_available: !item.is_available }).eq('id', item.id);
-      if (error) throw error;
-      setItems((prev) => prev.map((m) => m.id === item.id ? { ...m, is_available: !m.is_available } : m));
-    } catch (error: unknown) {
-      setErr(t(parseKvError(error).key));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function toggleCustomerVisibility(item: MenuItem) {
     if (visibilityBusyId) return;
     const isActive = !item.is_active;
@@ -283,17 +268,6 @@ export default function AdminMenu() {
               </p>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={item.is_available}
-                aria-label={`${item.name_en}: ${t('admin.available')}`}
-                className={`badge px-3 ${item.is_available ? 'bg-brand-successBg text-brand-success' : 'bg-brand-errorBg text-brand-error'}`}
-                disabled={busy}
-                onClick={() => void toggleAvailability(item)}
-              >
-                {item.is_available ? '✓ ' + t('admin.available') : '✕ ' + t('admin.unavailable')}
-              </button>
               <button
                 type="button"
                 role="switch"

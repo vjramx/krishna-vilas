@@ -132,7 +132,7 @@ export function ItemCard({ item, onOpen }: { item: MenuItem; onOpen?: (item: Men
       <div className="relative shrink-0 self-start">
         <button
           type="button"
-          className="block h-[104px] w-[104px] overflow-hidden rounded-2xl"
+          className="block h-[104px] w-[104px] overflow-hidden rounded-2xl ring-1 ring-black/10"
           aria-label={onOpen ? `${t('menu.details')}: ${name}` : name}
           onClick={() => onOpen?.(item)}
         >
@@ -256,10 +256,12 @@ export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: (
               : 'relative w-full min-w-0 h-[38dvh] min-h-[190px] shrink-0'
           }
         >
-          {/* The hero band is wider than the (usually square) food photo;
-              contain keeps the entire dish visible instead of cropping its
-              edges; the tinted backdrop fills the leftover bands. */}
-          <FoodImage item={item} className="absolute inset-0 h-full w-full" iconSize={48} alt={name} fit="contain" />
+          {/* The hero band is wider than the (usually 3:2) food photo; contain
+            keeps the entire dish visible instead of cropping its edges. A soft
+            brand-tinted radial “stage” plus a plating drop-shadow keeps the
+            centred photo premium — never a bare white band. */}
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_88%_at_50%_32%,rgba(200,62,36,0.10)_0%,rgba(200,62,36,0.04)_45%,transparent_72%)]" aria-hidden="true" />
+          <FoodImage item={item} className="absolute inset-0 h-full w-full [filter:drop-shadow(0_10px_14px_rgba(58,19,10,0.20))]" iconSize={48} alt={name} fit="contain" />
           {!item.image_path && (
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-secondary/5 to-brand-secondary/10" aria-hidden="true" />
           )}

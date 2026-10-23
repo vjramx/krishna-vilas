@@ -53,6 +53,7 @@ const DISHES = [
   ['Puri', 'Golden Puri Thali with Curry and Chutney.png', 'photos/puri.jpg'],
   ['Plain Dosa', 'Crispy Rolled Dosa with Sambar and Chutney.png', 'photos/plain-dosa.jpg'],
   ['Ragi Mudde (Village Style)', 'Rustic Ragi Ball with Chicken Curry Feast.png', 'photos/ragi-mudde.jpg'],
+  ['South Indian Meals', 'South Indian Thali Feast on Banana Leaf.png', 'photos/south-indian-meals.jpg'],
 ];
 
 async function encodePhotograph(source) {
