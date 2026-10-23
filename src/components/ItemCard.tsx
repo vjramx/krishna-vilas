@@ -257,15 +257,16 @@ export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: (
           }
         >
           {/* The hero band is wider than the (usually 3:2) food photo; contain
-            keeps the entire dish visible instead of cropping its edges. A soft
-            brand-tinted radial “stage” plus a plating drop-shadow keeps the
-            centred photo premium — never a bare white band. */}
+              keeps the entire dish visible instead of cropping its edges. A
+              soft brand-tinted radial “stage”, a plating drop-shadow and a
+              fade out to the details below keep the centered photo premium —
+              never a bare white band with a hard seam. */}
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_88%_at_50%_32%,rgba(200,62,36,0.10)_0%,rgba(200,62,36,0.04)_45%,transparent_72%)]" aria-hidden="true" />
           <FoodImage item={item} className="absolute inset-0 h-full w-full [filter:drop-shadow(0_10px_14px_rgba(58,19,10,0.20))]" iconSize={48} alt={name} fit="contain" />
           {!item.image_path && (
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-secondary/5 to-brand-secondary/10" aria-hidden="true" />
           )}
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/25 to-transparent" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-white to-transparent" aria-hidden="true" />
           {!item.is_available && (
             <span className="absolute bottom-3 left-3 rounded-xl bg-black/65 px-3 py-1.5 text-sm font-bold text-white backdrop-blur">
               {t('menu.soldOut')}
@@ -281,7 +282,7 @@ export function ItemSheet({ item, onClose }: { item: MenuItem | null; onClose: (
           className={
             wide
               ? 'min-h-0 min-w-0 flex-1 overflow-y-auto px-8 pb-6 pt-6'
-              : 'w-full min-w-0 px-4 pb-4 pt-4'
+              : 'w-full min-w-0 px-5 pb-5 pt-3.5'
           }
         >
           <div className={wide ? 'mx-auto w-full max-w-[640px]' : undefined}>
