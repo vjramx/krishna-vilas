@@ -109,7 +109,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-brand-border bg-white shadow-elev2"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/15 bg-brand-primary text-white shadow-elev2"
       style={{ paddingBottom: 'var(--safe-bottom)' }}
     >
       <ul className="mx-auto flex w-full max-w-app">
@@ -123,7 +123,7 @@ export function BottomNav() {
                 onClick={() => haptic(6)}
                 className={({ isActive }) =>
                   `tap flex h-[58px] flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${
-                    isActive ? 'text-brand-primary' : 'text-brand-subtle'
+                    isActive ? 'text-white' : 'text-white/70'
                   }`
                 }
               >
@@ -131,12 +131,12 @@ export function BottomNav() {
                   <>
                     <span
                       className={`relative grid h-7 w-14 place-items-center rounded-full transition-colors ${
-                        isActive ? 'bg-brand-primary/12' : ''
+                        isActive ? 'bg-white/20' : ''
                       }`}
                     >
                       <Icon size={21} strokeWidth={isActive ? 2.4 : 1.9} aria-hidden="true" />
                       {tab.to === '/cart' && cart.count > 0 && (
-                        <span className="absolute -top-1 right-1.5 min-w-[18px] rounded-full bg-brand-primary px-1 text-[10px] font-bold leading-[18px] text-white">
+                        <span className="absolute -top-1 right-1.5 min-w-[18px] rounded-full bg-white px-1 text-[10px] font-bold leading-[18px] text-brand-primary">
                           {cart.count > 99 ? '99+' : cart.count}
                         </span>
                       )}
