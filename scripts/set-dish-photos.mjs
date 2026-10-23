@@ -51,6 +51,7 @@ const DISHES = [
   ['Chapati & Curry', 'Rustic Indian Curry and Roti Feast.png', 'photos/chapati-curry.jpg'],
   ['Idli (2 pcs)', 'South Indian Breakfast Platter.png', 'photos/idli.jpg'],
   ['Puri', 'Golden Puri Thali with Curry and Chutney.png', 'photos/puri.jpg'],
+  ['Plain Dosa', 'Crispy Rolled Dosa with Sambar and Chutney.png', 'photos/plain-dosa.jpg'],
 ];
 
 async function encodePhotograph(source) {
