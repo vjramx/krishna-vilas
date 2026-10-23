@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
@@ -139,5 +139,54 @@ describe('Admin access role lifecycle', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('admin.access.errNotSuper');
     await waitFor(() => expect(screen.getByRole('button', { name: 'admin.access.send' })).toBeEnabled());
+  });
+
+  it('the Add-admin picker lists every account with its role and grants Admin access directly', async () => {
+    h.rpc.mockImplementation((name: string) => {
+      if (name === 'admin_user_directory') {
+        return Promise.resolve({ data: { users: [
+          { user_id: 'u1', email: 'vijayramv229@gmail.com', display_name: 'Vijay', first_seen_at: null, last_seen_at: null, order_count: 0, admin_role: 'super_admin' },
+          { user_id: 'u2', email: 'customer@example.com', display_name: 'Cus Tomer', first_seen_at: null, last_seen_at: null, order_count: 2, admin_role: null },
+        ] }, error: null });
+      }
+      return Promise.resolve({ data: name === 'is_current_super_admin' ? true : null, error: null });
+    });
+    render(<AdminAccess />);
+    await screen.findByRole('heading', { name: 'admin.access.inviteTitle' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'admin.access.addAdmin' }));
+    expect(await screen.findByText('customer@example.com')).toBeInTheDocument();
+    const ownerRow = screen.getByText('vijayramv229@gmail.com').closest('li')!;
+    expect(within(ownerRow).getByText('admin.access.roleSuper')).toBeInTheDocument(); // owner shows as Super admin
+
+    const customerRow = screen.getByText('customer@example.com').closest('li')!;
+    fireEvent.click(within(customerRow).getByRole('button', { name: 'admin.access.grantAdmin' }));
+    await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('staff_grant_admin', {
+      p_email: 'customer@example.com',
+      p_role: 'admin',
+    }));
+    expect(await screen.findByRole('status')).toHaveTextContent('admin.access.granted');
+  });
+
+  it('picker errors surface inside the sheet without losing the search context', async () => {
+    h.rpc.mockImplementation((name: string) => {
+      if (name === 'admin_user_directory') {
+        return Promise.resolve({ data: { users: [
+          { user_id: 'u2', email: 'x@example.com', display_name: null, first_seen_at: null, last_seen_at: null, order_count: 0, admin_role: null },
+        ] }, error: null });
+      }
+      if (name === 'staff_grant_admin') {
+        return Promise.resolve({ data: null, error: { message: 'USER_NOT_SIGNED_UP:x@example.com' } });
+      }
+      return Promise.resolve({ data: name === 'is_current_super_admin' ? true : null, error: null });
+    });
+    render(<AdminAccess />);
+    await screen.findByRole('heading', { name: 'admin.access.inviteTitle' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'admin.access.addAdmin' }));
+    const grant = await screen.findByRole('button', { name: 'admin.access.grantAdmin' });
+    fireEvent.click(grant);
+    expect(await screen.findByRole('alert')).toHaveTextContent('admin.access.userNotSignedUp');
+    expect(screen.getByRole('button', { name: 'admin.access.grantAdmin' })).toBeInTheDocument(); // sheet stays open
   });
 });

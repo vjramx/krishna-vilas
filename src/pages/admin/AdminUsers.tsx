@@ -12,6 +12,10 @@ interface DirectoryUser {
   first_seen_at: string;
   last_seen_at: string;
   order_count: number;
+  /** Surfaced by the directory RPC since 0023: null for customers,
+   * 'admin' | 'super_admin' for staff (staff never appear in activity, so
+   * the role chip is the only way the owner shows up as Super admin here). */
+  admin_role?: 'admin' | 'super_admin' | null;
 }
 interface DirectoryResult {
   total_users: number;
@@ -103,7 +107,11 @@ export default function AdminUsers() {
         <ul className="grid gap-2">
           {result.users.map((user) => <li key={user.user_id} className="card grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <div className="min-w-0"><p className="truncate font-semibold">{user.display_name || user.email}</p><p className="truncate text-xs text-brand-subtle">{user.email}</p><p className="mt-1 text-xs text-brand-subtle">{t('admin.users.firstSeen')}: {date(user.first_seen_at)}</p><p className="text-xs text-brand-subtle">{t('admin.users.lastActive')}: {date(user.last_seen_at)}</p></div>
-            <span className="badge w-fit bg-brand-bg text-brand-text"><ShoppingBag size={14} aria-hidden="true" /> {t('admin.users.orders', { count: user.order_count })}</span>
+            <div className="flex flex-col items-start gap-1 sm:items-end">
+              <span className="badge w-fit bg-brand-bg text-brand-text"><ShoppingBag size={14} aria-hidden="true" /> {t('admin.users.orders', { count: user.order_count })}</span>
+              {user.admin_role === 'super_admin' && <span className="badge w-fit bg-brand-primary/10 text-brand-primary">{t('admin.access.roleSuper')}</span>}
+              {user.admin_role === 'admin' && <span className="badge w-fit bg-brand-border/40 text-brand-subtle">{t('admin.access.roleAdmin')}</span>}
+            </div>
           </li>)}
         </ul>
       ) : <p className="card p-5 text-sm text-brand-subtle" role="status">{t('admin.users.empty')}</p>}

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useLanguage } from '@/context/LanguageContext';
-import { EmptyState, ErrorState, Spinner } from '@/components/ui';
-import { MailPlus, ShieldCheck, ShieldX, Trash2 } from 'lucide-react';
+import { EmptyState, ErrorState, Sheet, Spinner } from '@/components/ui';
+import { MailPlus, Search, ShieldCheck, ShieldX, Trash2, UserPlus } from 'lucide-react';
 
 interface Invitation {
   id: string;
@@ -22,6 +22,18 @@ interface AdminRow {
   created_at: string;
 }
 
+/** Row of the Add-admin picker: every registered account, with the staff role
+ * surfaced by admin_user_directory (0023) so current admins are obvious. */
+interface DirectoryUserRow {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  order_count: number;
+  admin_role?: 'admin' | 'super_admin' | null;
+}
+
 const STATUS_ACTIONS: Record<string, string> = {
   NOT_SUPER_ADMIN: 'admin.access.errNotSuper',
   FIELD_EMAIL: 'admin.access.errEmail',
@@ -32,6 +44,8 @@ const STATUS_ACTIONS: Record<string, string> = {
   AUTH_REQUIRED: 'admin.access.noManagementAccess',
   CANNOT_REMOVE_SELF: 'admin.access.errRemoveSelf',
   CANNOT_REMOVE_SUPER_ADMIN: 'admin.access.errRemoveSuper',
+  USER_NOT_SIGNED_UP: 'admin.access.userNotSignedUp',
+  LAST_SUPER_ADMIN: 'admin.access.errLastSuper',
 };
 
 function fmtDate(iso: string, locale: string): string {
@@ -51,6 +65,13 @@ export default function AdminAccess() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Add-admin picker: the searchable list of every registered account.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerUsers, setPickerUsers] = useState<DirectoryUserRow[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -134,6 +155,65 @@ export default function AdminAccess() {
     }
   }
 
+  /** Debounced, searchable directory-over-auth.users (0023). Backed by the
+   * same RPC the Users page uses, so both surfaces stay consistent. */
+  const loadPickerUsers = useCallback(async (searchTerm: string) => {
+    setPickerLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_user_directory', {
+        p_search: searchTerm.trim() || null,
+        p_filter: 'all',
+        p_limit: 50,
+        p_offset: 0,
+      });
+      if (error) {
+        setPickerError(rpcErrorKey(error));
+        return;
+      }
+      setPickerUsers(((data as { users?: DirectoryUserRow[] }).users ?? []));
+      setPickerError(null);
+    } catch (error: unknown) {
+      setPickerError(rpcErrorKey(error));
+    } finally {
+      setPickerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const timer = window.setTimeout(() => void loadPickerUsers(pickerSearch), 250);
+    return () => window.clearTimeout(timer);
+  }, [pickerOpen, pickerSearch, loadPickerUsers]);
+
+  function closePicker() {
+    setPickerOpen(false);
+    setPickerSearch('');
+    setPickerUsers([]);
+    setPickerError(null);
+  }
+
+  /** Direct grant for an already registered account (invitation covers the
+   * rest). Success closes the picker and refreshes the admins list; errors
+   * surface inside the sheet so the admin never loses their search context. */
+  async function grantAccess(emailTarget: string, role: 'admin' | 'super_admin') {
+    if (busy) return;
+    setBusy(true);
+    setNotice(null);
+    setFormError(null);
+    setPickerError(null);
+    try {
+      const { error } = await supabase.rpc('staff_grant_admin', { p_email: emailTarget, p_role: role });
+      if (error) throw error;
+      closePicker();
+      setNotice(t('admin.access.granted'));
+      void load();
+    } catch (error: unknown) {
+      setPickerError(rpcErrorKey(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removeAccess(emailTarget: string) {
     if (busy) return;
     setBusy(true);
@@ -159,7 +239,15 @@ export default function AdminAccess() {
 
   return (
     <div className="grid gap-3 content-start">
-      <h1 className="text-lg font-bold">{t('admin.access')}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-bold">{t('admin.access')}</h1>
+        {isSuper && (
+          <button type="button" className="btn-primary min-h-11 gap-2" onClick={() => setPickerOpen(true)}>
+            <UserPlus size={17} aria-hidden="true" />
+            {t('admin.access.addAdmin')}
+          </button>
+        )}
+      </div>
 
       {!isSuper && (
         <div className="card p-4" role="note">
@@ -370,6 +458,100 @@ export default function AdminAccess() {
           </article>
         </div>
       </section>
+
+      {/* Add-admin picker: every registered account, searchable, with direct
+          role grants (no invitation round trip). Bottom sheet on phones,
+          centered dialog on desktop via desktopDialog. */}
+      <Sheet
+        open={pickerOpen}
+        onClose={closePicker}
+        title={t('admin.access.addAdmin')}
+        desktopDialog
+        headerIcon={<span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-primary/10 text-brand-primary"><UserPlus size={18} aria-hidden="true" /></span>}
+      >
+        <div className="grid content-start gap-3 px-4 pb-4">
+          <p className="text-xs text-brand-subtle">{t('admin.access.pickHint')}</p>
+          {pickerError && (
+            <p className="card border-brand-error/25 p-3 text-sm text-brand-error" role="alert">{t(pickerError)}</p>
+          )}
+          <label className="relative block">
+            <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-brand-subtle" aria-hidden="true" />
+            <input
+              className="input pl-9"
+              type="search"
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              placeholder={t('admin.users.search')}
+              aria-label={t('admin.users.search')}
+            />
+          </label>
+          {pickerLoading ? (
+            <div className="grid place-items-center py-8"><Spinner /></div>
+          ) : pickerUsers.length === 0 ? (
+            <p className="card p-5 text-center text-sm text-brand-subtle">{t('admin.access.noUsersFound')}</p>
+          ) : (
+            <ul className="grid gap-2">
+              {pickerUsers.map((u) => (
+                <li key={u.user_id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-2xl border border-brand-border bg-white p-2.5">
+                  <span
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-secondary to-brand-primary text-xs font-bold text-white"
+                    aria-hidden="true"
+                  >
+                    {(u.display_name || u.email).slice(0, 2).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{u.display_name || u.email}</p>
+                    <p className="truncate text-xs text-brand-subtle">{u.email}</p>
+                  </div>
+                  {u.admin_role && (
+                    <span
+                      className={`badge shrink-0 ${
+                        u.admin_role === 'super_admin' ? 'bg-brand-primary/10 text-brand-primary' : 'bg-brand-border/40 text-brand-subtle'
+                      }`}
+                    >
+                      {u.admin_role === 'super_admin' ? t('admin.access.roleSuper') : t('admin.access.roleAdmin')}
+                    </span>
+                  )}
+                  <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1.5">
+                    {!u.admin_role && (
+                      <button
+                        type="button"
+                        className="btn-secondary min-h-[44px] px-3 text-sm"
+                        disabled={busy}
+                        onClick={() => void grantAccess(u.email, 'admin')}
+                      >
+                        {t('admin.access.grantAdmin')}
+                      </button>
+                    )}
+                    {u.admin_role !== 'super_admin' && (
+                      <button
+                        type="button"
+                        className="btn-secondary min-h-[44px] px-3 text-sm text-brand-primary"
+                        disabled={busy}
+                        onClick={() => void grantAccess(u.email, 'super_admin')}
+                        aria-label={`${u.email}: ${t('admin.access.makeSuper')}`}
+                      >
+                        {t('admin.access.makeSuper')}
+                      </button>
+                    )}
+                    {u.admin_role === 'super_admin' && (
+                      <button
+                        type="button"
+                        className="btn-secondary min-h-[44px] px-3 text-sm"
+                        disabled={busy}
+                        onClick={() => void grantAccess(u.email, 'admin')}
+                        aria-label={`${u.email}: ${t('admin.access.makeAdmin')}`}
+                      >
+                        {t('admin.access.makeAdmin')}
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Sheet>
     </div>
   );
 }
