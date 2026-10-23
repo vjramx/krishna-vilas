@@ -127,6 +127,7 @@ export function useMyOrders(): {
         setError(null);
       }
       const { data, error: err } = await fetchPage(0, userId);
+      if (!silent) setLoading(false);
       if (err) {
         if (!silent) setError(err);
         return;
